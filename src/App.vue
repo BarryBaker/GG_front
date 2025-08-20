@@ -148,7 +148,53 @@ function formatTimestampForModal(str) {
   return str
 }
 
+function parseCustomTimestamp(str) {
+  const match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
+  if (!match) return null
+  return { year: match[1], month: match[2], day: match[3], hours: match[4], minutes: match[5] }
+}
+
+function normalizeNumber(value) {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/,/g, '').trim()
+    const num = parseFloat(cleaned)
+    return Number.isFinite(num) ? num : null
+  }
+  return null
+}
+
+function computeDailyDeltas(pd) {
+  if (!pd || !Array.isArray(pd.columns) || !Array.isArray(pd.rows)) return []
+  let lastNumeric = null
+  const dailyMap = new Map()
+  for (let i = 0; i < pd.columns.length; i++) {
+    const col = pd.columns[i]
+    const ts = parseCustomTimestamp(col)
+    if (!ts) continue
+    const val = normalizeNumber(pd.rows[i])
+    if (val === null) continue
+    if (lastNumeric !== null) {
+      const delta = val - lastNumeric
+      const dateKey = `${ts.year}-${ts.month}-${ts.day}`
+      const dateLabel = `${ts.year} ${ts.month} ${ts.day}`
+      let dayEntry = dailyMap.get(dateKey)
+      if (!dayEntry) {
+        dayEntry = { dateKey, dateLabel, points: [], maxDelta: 0 }
+        dailyMap.set(dateKey, dayEntry)
+      }
+      const timeLabel = `${ts.hours}:${ts.minutes}`
+      dayEntry.points.push({ timeLabel, delta })
+      if (delta > dayEntry.maxDelta) dayEntry.maxDelta = delta
+    }
+    lastNumeric = val
+  }
+  return Array.from(dailyMap.values())
+}
+
 function transposePlayerData(data) {
+ 
   if (!data || !data.columns || !data.rows || data.rows.length < 2) return []
   
   const [playerRow, pointsRow] = data.rows
@@ -185,7 +231,7 @@ onMounted(fetchTables)
 <template>
   <main class="container">
     <header class="header">
-      <h1>GG Tables</h1>
+      <!-- <h1>GG Tables</h1> -->
       <div class="controls">
         <button @click="fetchTables" :disabled="loading">{{ loading ? 'Loading…' : 'Reload' }}</button>
       </div>
@@ -195,16 +241,16 @@ onMounted(fetchTables)
       <div class="error">{{ error }}</div>
     </section>
 
-    <section class="all-tables">
+    <!-- <section class="all-tables">
       <h2>All Tables ({{ allTables.length }})</h2>
       <div v-if="allTables.length === 0" class="muted">No tables found.</div>
       <ul v-else class="table-list">
         <li v-for="name in allTables" :key="name">{{ name }}</li>
       </ul>
-    </section>
+    </section> -->
 
     <section class="plo-tables">
-      <h2>PLO___050100 Table</h2>
+      <!-- <h2>PLO___050100 Table</h2> -->
       <div v-if="ploTables.length === 0" class="muted">No PLO tables.</div>
 
       <div v-for="tableName in ploTables" :key="tableName" class="table-block">
@@ -245,22 +291,16 @@ onMounted(fetchTables)
         <button class="close-btn" @click="showPlayerModal = false">&times;</button>
       </div>
       <div class="modal-body">
-        <div v-if="playerData && playerData.columns && playerData.rows && playerData.rows.length > 0" class="scroll-x">
-          <table class="player-data-table">
-            <thead>
-              <tr>
-                <th>Timestamp</th>
-                <th>Value</th>
-              </tr>
-            </thead>
-                          <tbody>
-                <tr v-for="(colName, index) in (playerData.columns || [])" :key="index" 
-                    v-show="!colName.includes('name') && !colName.includes('created_at') && playerData.rows[1] && playerData.rows[1][colName] !== null">
-                  <td>{{ formatTimestampForModal(colName) }}</td>
-                  <td>{{ formatCell(playerData.rows[index]) }}</td>
-                </tr>
-              </tbody>
-          </table>
+        <div v-if="playerData && playerData.columns && playerData.rows && playerData.rows.length > 0" class="charts">
+          <div v-for="day in computeDailyDeltas(playerData)" :key="day.dateKey" class="day-chart">
+            <div class="day-header">{{ day.dateLabel }}</div>
+            <div class="bar-chart">
+              <div v-for="(pt, i) in day.points" :key="i" class="bar-column" :title="pt.timeLabel + ' Δ ' + pt.delta">
+                <div class="bar" :style="{ height: (day.maxDelta ? Math.max(0, pt.delta) / day.maxDelta * 120 : 0) + 'px' }"></div>
+                <div class="bar-label">{{ pt.timeLabel }}</div>
+              </div>
+            </div>
+          </div>
         </div>
         <div v-else class="muted">No player data available.</div>
       </div>
@@ -424,5 +464,47 @@ th, td {
 .player-data-table th {
   background: #1e364e;
   font-weight: 600;
+}
+
+.bar-label {
+  font-size: 10px;
+  color: #ccc;
+  margin-top: 4px;
+  transform: rotate(-45deg);
+  transform-origin: top left;
+}
+
+/* Charts */
+.charts {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.day-header {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 140px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.bar-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 8px;
+}
+
+.bar {
+  width: 100%;
+  background: #4ea1d3;
+  border-radius: 2px 2px 0 0;
 }
 </style>
