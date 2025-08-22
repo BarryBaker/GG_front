@@ -172,24 +172,32 @@ function computeDailyDeltas(pd) {
   for (let i = 0; i < pd.columns.length; i++) {
     const col = pd.columns[i]
     const ts = parseCustomTimestamp(col)
+    
     if (!ts) continue
     const val = normalizeNumber(pd.rows[i])
     if (val === null) continue
+
+    const minutesFromMidnight = parseInt(ts.hours, 10) * 60 + parseInt(ts.minutes, 10)
+    const dateKey = `${ts.year}-${ts.month}-${ts.day}`
+    const dateLabel = `${ts.year} ${ts.month} ${ts.day}`
+    let dayEntry = dailyMap.get(dateKey)
+    if (!dayEntry) {
+      dayEntry = { dateKey, dateLabel, points: [], maxDelta: 0, lastMinutes: null }
+      dailyMap.set(dateKey, dayEntry)
+    }
+
     if (lastNumeric !== null) {
       const delta = val - lastNumeric
-      const dateKey = `${ts.year}-${ts.month}-${ts.day}`
-      const dateLabel = `${ts.year} ${ts.month} ${ts.day}`
-      let dayEntry = dailyMap.get(dateKey)
-      if (!dayEntry) {
-        dayEntry = { dateKey, dateLabel, points: [], maxDelta: 0 }
-        dailyMap.set(dateKey, dayEntry)
-      }
+      const timeDeltaMinutes = dayEntry.lastMinutes === null ? minutesFromMidnight : Math.max(0, minutesFromMidnight - dayEntry.lastMinutes)
       const timeLabel = `${ts.hours}:${ts.minutes}`
-      dayEntry.points.push({ timeLabel, delta })
+      dayEntry.points.push({ timeLabel, delta, timeDeltaMinutes })
       if (delta > dayEntry.maxDelta) dayEntry.maxDelta = delta
     }
+
+    dayEntry.lastMinutes = minutesFromMidnight
     lastNumeric = val
   }
+  console.log(Array.from(dailyMap.values()))
   return Array.from(dailyMap.values())
 }
 
@@ -214,8 +222,10 @@ async function handleNameClick(name, tableName) {
       response.rows = response.rows[0]
     }
     console.log(response)
+    if (response && Array.isArray(response.rows)) {
+      response.rows = response.rows.map(row => row === null ? "0" : row)
+    }
     playerData.value = response
-    console.log(playerData.value.type)
     selectedPlayerName.value = name
     showPlayerModal.value = true
     // console.log('Player data received:', response)
@@ -295,11 +305,16 @@ onMounted(fetchTables)
           <div v-for="day in computeDailyDeltas(playerData)" :key="day.dateKey" class="day-chart">
             <div class="day-header">{{ day.dateLabel }}</div>
             <div class="bar-chart">
-              <div v-for="(pt, i) in day.points" :key="i" class="bar-column" :title="pt.timeLabel + ' Δ ' + pt.delta">
+              <div v-for="(pt, i) in day.points" :key="i" class="bar-column" :title="pt.timeLabel + ' Δ ' + pt.delta" :style="{ width: ((pt.timeDeltaMinutes || 0) / 1440 * 100) + '%' }">
                 <div class="bar" :style="{ height: (day.maxDelta ? Math.max(0, pt.delta) / day.maxDelta * 120 : 0) + 'px' }"></div>
-                <div class="bar-label">{{ pt.timeLabel }}</div>
+                <!-- <div v-if="i % 30 === 0" class="bar-label">{{ pt.timeLabel }}</div> -->
               </div>
             </div>
+          <div class="hours-labels">
+            <span v-for="h in 24" :key="h-1" class="hour-cell">
+              {{ h - 1 }}
+            </span>
+          </div>
           </div>
         </div>
         <div v-else class="muted">No player data available.</div>
@@ -405,8 +420,8 @@ th, td {
 .modal-content {
   background: rgb(30, 30, 56);
   border-radius: 8px;
-  max-width: 90vw;
-  max-height: 90vh;
+  min-width: 90vw;
+  max-height: 120vh;
   overflow: hidden;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
@@ -467,18 +482,20 @@ th, td {
 }
 
 .bar-label {
+  /* position: absolute; */
+  /* top: calc(100%); */
+  /* left: 50%; */
+  /* transform: translateX(-50%); */
   font-size: 10px;
   color: #ccc;
-  margin-top: 4px;
-  transform: rotate(-45deg);
-  transform-origin: top left;
+  pointer-events: none;
 }
 
 /* Charts */
 .charts {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  /* gap: 1.5rem; */
 }
 
 .day-header {
@@ -489,7 +506,7 @@ th, td {
 .bar-chart {
   display: flex;
   align-items: flex-end;
-  gap: 4px;
+  gap: 0px;
   height: 140px;
   overflow-x: auto;
   padding-bottom: 8px;
@@ -499,12 +516,36 @@ th, td {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 8px;
+  /* width: 8px; */
+  position: relative;
 }
 
 .bar {
   width: 100%;
   background: #4ea1d3;
   border-radius: 2px 2px 0 0;
+}
+
+/* Hours strip below each day chart */
+.hours-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #c9d6e9;
+  background: #25466b;
+  border: 1px solid #3a5a82;
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+.hour-cell {
+  flex: 1 1 0;
+  text-align: center;
+  border-right: 1px solid #3a5a82;
+}
+
+.hour-cell:last-child {
+  border-right: none;
 }
 </style>
