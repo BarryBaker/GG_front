@@ -9,6 +9,10 @@ const ploDataByTable = ref({})
 const playerData = ref({})
 const showPlayerModal = ref(false)
 const selectedPlayerName = ref('')
+const currentUtcDateKey = ref('')
+const currentUtcMinutesOfDay = ref(0)
+const topPlayers = ref([])
+const topPlayersLoading = ref(false)
 const loading = ref(false)
 const error = ref('')
 
@@ -56,6 +60,25 @@ async function fetchPloTablesData() {
     map[name] = table
   }
   ploDataByTable.value = map
+}
+
+async function fetchTopPlayers(tableName) {
+  topPlayersLoading.value = true
+  try {
+    const res = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(tableName)}/top-players`)
+    if (Array.isArray(res)) {
+      topPlayers.value = res
+    } else if (Array.isArray(res?.rows)) {
+      topPlayers.value = res.rows
+    } else {
+      topPlayers.value = []
+    }
+  } catch (e) {
+    // don't block main UI on this error; surface quietly
+    console.error('Failed to fetch top players:', e)
+  } finally {
+    topPlayersLoading.value = false
+  }
 }
 
 function normalizeTablePayload(payload) {
@@ -154,6 +177,22 @@ function parseCustomTimestamp(str) {
   return { year: match[1], month: match[2], day: match[3], hours: match[4], minutes: match[5] }
 }
 
+function zeroPad(n) {
+  const num = typeof n === 'number' ? n : parseInt(String(n), 10)
+  return num < 10 ? `0${num}` : String(num)
+}
+
+function setNowUtc() {
+  const now = new Date()
+  const y = now.getUTCFullYear()
+  const m = zeroPad(now.getUTCMonth() + 1)
+  const d = zeroPad(now.getUTCDate())
+  const hh = now.getUTCHours()
+  const mm = now.getUTCMinutes()
+  currentUtcDateKey.value = `${y}-${m}-${d}`
+  currentUtcMinutesOfDay.value = hh * 60 + mm
+}
+
 function normalizeNumber(value) {
   if (value === null || value === undefined) return null
   if (typeof value === 'number') return value
@@ -188,11 +227,13 @@ function computeDailyDeltas(pd) {
 
     if (lastNumeric !== null) {
       const delta = val - lastNumeric
+     
       const timeDeltaMinutes = dayEntry.lastMinutes === null ? minutesFromMidnight : Math.max(0, minutesFromMidnight - dayEntry.lastMinutes)
       const timeLabel = `${ts.hours}:${ts.minutes}`
       const clampedDelta = Math.min(20, Math.max(0, delta))
       const truncates = clampedDelta !== delta
-      dayEntry.points.push({ timeLabel, delta, clampedDelta, timeDeltaMinutes, truncates })
+      
+      dayEntry.points.push({ timeLabel, delta, clampedDelta, timeDeltaMinutes, truncates, value: val })
       if (clampedDelta > dayEntry.maxDelta) dayEntry.maxDelta = clampedDelta
     }
 
@@ -229,6 +270,7 @@ async function handleNameClick(name, tableName) {
     }
     playerData.value = response
     selectedPlayerName.value = name
+    setNowUtc()
     showPlayerModal.value = true
     // console.log('Player data received:', response)
   } catch (e) {
@@ -237,7 +279,10 @@ async function handleNameClick(name, tableName) {
   }
 }
 
-onMounted(fetchTables)
+onMounted(() => {
+  fetchTables()
+  fetchTopPlayers('PLO___050100')
+})
 </script>
 
 <template>
@@ -245,7 +290,7 @@ onMounted(fetchTables)
     <header class="header">
       <!-- <h1>GG Tables</h1> -->
       <div class="controls">
-        <button @click="fetchTables" :disabled="loading">{{ loading ? 'Loading…' : 'Reload' }}</button>
+        <button @click="fetchTables; fetchTopPlayers('PLO___050100')" :disabled="loading || topPlayersLoading">{{ loading ? 'Loading…' : 'Reload' }}</button>
       </div>
     </header>
 
@@ -253,7 +298,20 @@ onMounted(fetchTables)
       <div class="error">{{ error }}</div>
     </section>
 
-    <!-- <section class="all-tables">
+    <div class="layout">
+      <aside class="sidebar">
+        <h3>Top players</h3>
+        <div v-if="topPlayersLoading" class="muted">Loading…</div>
+        <div v-else-if="topPlayers.length === 0" class="muted">No players.</div>
+        <ul v-else class="players-list">
+          <li v-for="name in topPlayers" :key="name">
+            <span class="clickable-name" @click="handleNameClick(name, 'PLO___050100')">{{ name }}</span>
+          </li>
+        </ul>
+      </aside>
+
+      <section class="content">
+        <!-- <section class="all-tables">
       <h2>All Tables ({{ allTables.length }})</h2>
       <div v-if="allTables.length === 0" class="muted">No tables found.</div>
       <ul v-else class="table-list">
@@ -261,74 +319,80 @@ onMounted(fetchTables)
       </ul>
     </section> -->
 
-    <section class="plo-tables">
-      <!-- <h2>PLO___050100 Table</h2> -->
-      <div v-if="ploTables.length === 0" class="muted">No PLO tables.</div>
+        <section class="plo-tables">
+          <!-- <h2>PLO___050100 Table</h2> -->
+          <div v-if="ploTables.length === 0" class="muted">No PLO tables.</div>
 
-      <div v-for="tableName in ploTables" :key="tableName" class="table-block">
-        <h3>{{ tableName }}</h3>
-        <div v-if="!(ploDataByTable[tableName] && (ploDataByTable[tableName].rows || []).length > 0)" class="muted">No rows.</div>
-        <div v-else class="scroll-x">
-          <table>
-            <thead>
-              <tr>
-                <th v-for="(col, cIdx) in (ploDataByTable[tableName]?.columns || [])" :key="cIdx">{{ formatCell(col) }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, rIdx) in (ploDataByTable[tableName]?.rows || [])" :key="rIdx">
-                <td v-for="(col, cIdx) in (ploDataByTable[tableName]?.columns || [])" :key="cIdx">
-                  <span v-if="cIdx === 0" 
-                        @click="handleNameClick(Array.isArray(row) ? row[cIdx] : row[col], tableName)" 
-                        class="clickable-name">
-                    {{ formatCell(Array.isArray(row) ? row[cIdx] : row[col]) }}
-                  </span>
-                  <span v-else>{{ formatCell(Array.isArray(row) ? row[cIdx] : row[col]) }}</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div v-for="tableName in ploTables" :key="tableName" class="table-block">
+            <h3>{{ tableName }}</h3>
+            <div v-if="!(ploDataByTable[tableName] && (ploDataByTable[tableName].rows || []).length > 0)" class="muted">No rows.</div>
+            <div v-else class="scroll-x">
+              <table>
+                <thead>
+                  <tr>
+                    <th v-for="(col, cIdx) in (ploDataByTable[tableName]?.columns || [])" :key="cIdx">{{ formatCell(col) }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, rIdx) in (ploDataByTable[tableName]?.rows || [])" :key="rIdx">
+                    <td v-for="(col, cIdx) in (ploDataByTable[tableName]?.columns || [])" :key="cIdx">
+                      <span v-if="cIdx === 0" 
+                            @click="handleNameClick(Array.isArray(row) ? row[cIdx] : row[col], tableName)" 
+                            class="clickable-name">
+                        {{ formatCell(Array.isArray(row) ? row[cIdx] : row[col]) }}
+                      </span>
+                      <span v-else>{{ formatCell(Array.isArray(row) ? row[cIdx] : row[col]) }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </section>
+    </div>
+
+    <!-- Player Data Modal -->
+    <div v-if="showPlayerModal" class="modal-overlay" @click="showPlayerModal = false">
+      <!-- <div>aaaa   {{ playerData.rows }}aaaaa</div> -->
+      <!-- <div v-for="player in playerData" :key="player.name">{{ player }}</div> -->
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>Player Data: {{ selectedPlayerName }}</h3>
+          <button class="close-btn" @click="showPlayerModal = false">&times;</button>
         </div>
-      </div>
-    </section>
-  </main>
-
-  <!-- Player Data Modal -->
-  <div v-if="showPlayerModal" class="modal-overlay" @click="showPlayerModal = false">
-    <!-- <div>aaaa   {{ playerData.rows }}aaaaa</div> -->
-    <!-- <div v-for="player in playerData" :key="player.name">{{ player }}</div> -->
-    <div class="modal-content" @click.stop>
-      <div class="modal-header">
-        <h3>Player Data: {{ selectedPlayerName }}</h3>
-        <button class="close-btn" @click="showPlayerModal = false">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div v-if="playerData && playerData.columns && playerData.rows && playerData.rows.length > 0" class="charts">
-          <div v-for="day in computeDailyDeltas(playerData)" :key="day.dateKey" class="day-chart">
-            <div class="day-header">{{ day.dateLabel }}</div>
-            <div class="bar-chart">
-              <div v-for="(pt, i) in day.points" :key="i" class="bar-column" :title="pt.timeLabel + ' Δ ' + pt.delta" :style="{ width: ((pt.timeDeltaMinutes || 0) / 1440 * 100) + '%' }">
-                <div
-                  class="bar"
-                  :style="{
-                    height: (day.maxDelta ? (pt.clampedDelta || 0) / day.maxDelta * 120 : 0) + 'px',
-                    background: pt.truncates ? '#3576a6' : '#4ea1d3'
-                  }"
-                ></div>
-                <!-- <div v-if="i % 30 === 0" class="bar-label">{{ pt.timeLabel }}</div> -->
+        <div class="modal-body">
+          <div v-if="playerData && playerData.columns && playerData.rows && playerData.rows.length > 0" class="charts">
+            <div v-for="day in computeDailyDeltas(playerData)" :key="day.dateKey" class="day-chart">
+              <div class="day-header">{{ day.dateLabel }}</div>
+              <div class="bar-chart">
+                <div class="bar-chart-content">
+                  <div class="eight-line" :style="{ left: ((8 * 60) / 1440 * 100) + '%' }"></div>
+                  <div v-for="(pt, i) in day.points" :key="i" class="bar-column" :title="pt.timeLabel + ' Δ ' + pt.delta + ' total ' + pt.value" :style="{ width: ((pt.timeDeltaMinutes || 0) / 1440 * 100) + '%' }">
+                    <div
+                      class="bar"
+                      :style="{
+                        height: (day.maxDelta ? (pt.clampedDelta || 0) / day.maxDelta * 120 : 0) + 'px',
+                        background: pt.truncates ? '#3576a6' : '#4ea1d3'
+                      }"
+                    ></div>
+                    <!-- <div v-if="i % 30 === 0" class="bar-label">{{ pt.timeLabel }}</div> -->
+                  </div>
+                  <div v-if="day.dateKey === currentUtcDateKey" class="now-line" :style="{ left: (currentUtcMinutesOfDay / 1440 * 100) + '%' }"></div>
+                </div>
+              </div>
+              <div class="hours-labels">
+                <span v-for="h in 24" :key="h-1" class="hour-cell">
+                  {{ h - 1 }}
+                </span>
               </div>
             </div>
-          <div class="hours-labels">
-            <span v-for="h in 24" :key="h-1" class="hour-cell">
-              {{ h - 1 }}
-            </span>
           </div>
-          </div>
+          <div v-else class="muted">No player data available.</div>
         </div>
-        <div v-else class="muted">No player data available.</div>
       </div>
     </div>
-  </div>
+  </main>
 </template>
 
 <style scoped>
@@ -365,6 +429,44 @@ onMounted(fetchTables)
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
   margin-bottom: 1rem;
+}
+
+.layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.sidebar {
+  width: 240px;
+  min-width: 200px;
+  background: #243d5a;
+  border: 1px solid #355575;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.sidebar h3 {
+  margin: 0 0 0.5rem 0;
+}
+
+.players-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.players-list li {
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.players-list li:last-child {
+  border-bottom: none;
+}
+
+.content {
+  flex: 1 1 auto;
 }
 
 .all-tables, .plo-tables {
@@ -512,12 +614,18 @@ th, td {
 }
 
 .bar-chart {
-  display: flex;
+  display: block;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.bar-chart-content {
+  position: relative;
+  display: inline-flex;
   align-items: flex-end;
   gap: 0px;
   height: 140px;
-  overflow-x: auto;
-  padding-bottom: 8px;
+  min-width: 100%;
 }
 
 .bar-column {
@@ -532,6 +640,25 @@ th, td {
   width: 100%;
   background: #4ea1d3;
   border-radius: 2px 2px 0 0;
+}
+
+.now-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #ffcc66;
+  box-shadow: 0 0 2px rgba(255, 204, 102, 0.8);
+  z-index: 2;
+}
+
+.eight-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(60, 100, 150, 0.5);
+  z-index: 1;
 }
 
 /* Hours strip below each day chart */
