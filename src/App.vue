@@ -190,8 +190,10 @@ function computeDailyDeltas(pd) {
       const delta = val - lastNumeric
       const timeDeltaMinutes = dayEntry.lastMinutes === null ? minutesFromMidnight : Math.max(0, minutesFromMidnight - dayEntry.lastMinutes)
       const timeLabel = `${ts.hours}:${ts.minutes}`
-      dayEntry.points.push({ timeLabel, delta, timeDeltaMinutes })
-      if (delta > dayEntry.maxDelta) dayEntry.maxDelta = delta
+      const clampedDelta = Math.min(20, Math.max(0, delta))
+      const truncates = clampedDelta !== delta
+      dayEntry.points.push({ timeLabel, delta, clampedDelta, timeDeltaMinutes, truncates })
+      if (clampedDelta > dayEntry.maxDelta) dayEntry.maxDelta = clampedDelta
     }
 
     dayEntry.lastMinutes = minutesFromMidnight
@@ -306,7 +308,13 @@ onMounted(fetchTables)
             <div class="day-header">{{ day.dateLabel }}</div>
             <div class="bar-chart">
               <div v-for="(pt, i) in day.points" :key="i" class="bar-column" :title="pt.timeLabel + ' Δ ' + pt.delta" :style="{ width: ((pt.timeDeltaMinutes || 0) / 1440 * 100) + '%' }">
-                <div class="bar" :style="{ height: (day.maxDelta ? Math.max(0, pt.delta) / day.maxDelta * 120 : 0) + 'px' }"></div>
+                <div
+                  class="bar"
+                  :style="{
+                    height: (day.maxDelta ? (pt.clampedDelta || 0) / day.maxDelta * 120 : 0) + 'px',
+                    background: pt.truncates ? '#3576a6' : '#4ea1d3'
+                  }"
+                ></div>
                 <!-- <div v-if="i % 30 === 0" class="bar-label">{{ pt.timeLabel }}</div> -->
               </div>
             </div>
