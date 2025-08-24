@@ -1,7 +1,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 
-const API_BASE_URL = 'https://zooming-liberation-production.up.railway.app'
+const API_BASE_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
+  ? 'http://localhost:8000'
+  : 'https://zooming-liberation-production.up.railway.app'
 
 const allTables = ref([])
 const ploTables = ref([])
@@ -48,6 +50,7 @@ async function fetchPloTablesData() {
     ploTables.value.map(async (name) => {
       try {
         const payload = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(name)}/data`)
+        console.log(payload)
         const normalized = normalizeTablePayload(payload)
         return [name, normalized]
       } catch (e) {
@@ -65,7 +68,7 @@ async function fetchPloTablesData() {
 async function fetchTopPlayers(tableName) {
   topPlayersLoading.value = true
   try {
-    const res = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(tableName)}/top-players`)
+    const res = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(tableName)}/top-players?limit=24`)
     if (Array.isArray(res)) {
       topPlayers.value = res
     } else if (Array.isArray(res?.rows)) {
@@ -146,10 +149,16 @@ function formatCell(value) {
 }
 
 function tryFormatCustomTimestamp(str) {
-  // Matches: ts_YYYY_MM_DD_HHhMM (e.g., ts_2025_08_20_12h42)
-  const match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
+  // New format: YYYY-MM-DD HH:MM(:SS)?
+  let match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/.exec(str)
   if (match) {
-     
+    const hours = match[4]
+    const minutes = match[5]
+    return `${hours}:${minutes}`
+  }
+  // Backwards compat: ts_YYYY_MM_DD_HHhMM
+  match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
+  if (match) {
     const hours = match[4]
     const minutes = match[5]
     return `${hours}:${minutes}`
@@ -158,8 +167,18 @@ function tryFormatCustomTimestamp(str) {
 }
 
 function formatTimestampForModal(str) {
-  // Matches: ts_YYYY_MM_DD_HHhMM (e.g., ts_2025_08_20_12h42)
-  const match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
+  // New format: YYYY-MM-DD HH:MM(:SS)? -> YYYY MM DD HH:MM
+  let match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/.exec(str)
+  if (match) {
+    const year = match[1]
+    const month = match[2]
+    const day = match[3]
+    const hours = match[4]
+    const minutes = match[5]
+    return `${year} ${month} ${day} ${hours}:${minutes}`
+  }
+  // Backwards compat: ts_YYYY_MM_DD_HHhMM
+  match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
   if (match) {
     const year = match[1]
     const month = match[2]
@@ -172,9 +191,17 @@ function formatTimestampForModal(str) {
 }
 
 function parseCustomTimestamp(str) {
-  const match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
-  if (!match) return null
-  return { year: match[1], month: match[2], day: match[3], hours: match[4], minutes: match[5] }
+  // New format: YYYY-MM-DD HH:MM(:SS)?
+  let match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/.exec(str)
+  if (match) {
+    return { year: match[1], month: match[2], day: match[3], hours: match[4], minutes: match[5] }
+  }
+  // Backwards compat: ts_YYYY_MM_DD_HHhMM
+  match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
+  if (match) {
+    return { year: match[1], month: match[2], day: match[3], hours: match[4], minutes: match[5] }
+  }
+  return null
 }
 
 function zeroPad(n) {
@@ -193,29 +220,28 @@ function setNowUtc() {
   currentUtcMinutesOfDay.value = hh * 60 + mm
 }
 
-function normalizeNumber(value) {
-  if (value === null || value === undefined) return null
-  if (typeof value === 'number') return value
-  if (typeof value === 'string') {
-    const cleaned = value.replace(/,/g, '').trim()
-    const num = parseFloat(cleaned)
-    return Number.isFinite(num) ? num : null
-  }
-  return null
-}
+// function normalizeNumber(value) {
+//   if (value === null || value === undefined) return null
+//   if (typeof value === 'number') return value
+//   if (typeof value === 'string') {
+//     const cleaned = value.replace(/,/g, '').trim()
+//     const num = parseFloat(cleaned)
+//     return Number.isFinite(num) ? num : null
+//   }
+//   return null
+// }
 
 function computeDailyDeltas(pd) {
   if (!pd || !Array.isArray(pd.columns) || !Array.isArray(pd.rows)) return []
-  let lastNumeric = null
+  let lastNumeric = 0
   const dailyMap = new Map()
+  
   for (let i = 0; i < pd.columns.length; i++) {
     const col = pd.columns[i]
     const ts = parseCustomTimestamp(col)
-    
     if (!ts) continue
-    const val = normalizeNumber(pd.rows[i])
-    if (val === null) continue
-
+    const val = pd.rows[i]
+    
     const minutesFromMidnight = parseInt(ts.hours, 10) * 60 + parseInt(ts.minutes, 10)
     const dateKey = `${ts.year}-${ts.month}-${ts.day}`
     const dateLabel = `${ts.year} ${ts.month} ${ts.day}`
@@ -225,22 +251,23 @@ function computeDailyDeltas(pd) {
       dailyMap.set(dateKey, dayEntry)
     }
 
-    if (lastNumeric !== null) {
-      const delta = val - lastNumeric
-     
-      const timeDeltaMinutes = dayEntry.lastMinutes === null ? minutesFromMidnight : Math.max(0, minutesFromMidnight - dayEntry.lastMinutes)
-      const timeLabel = `${ts.hours}:${ts.minutes}`
-      const clampedDelta = Math.min(20, Math.max(0, delta))
-      const truncates = clampedDelta !== delta
-      
-      dayEntry.points.push({ timeLabel, delta, clampedDelta, timeDeltaMinutes, truncates, value: val })
-      if (clampedDelta > dayEntry.maxDelta) dayEntry.maxDelta = clampedDelta
-    }
+   
+    const delta = val - lastNumeric
+    
+    const timeDeltaMinutes = dayEntry.lastMinutes === null ? minutesFromMidnight : Math.max(0, minutesFromMidnight - dayEntry.lastMinutes)
+    const timeLabel = `${ts.hours}:${ts.minutes}`
+    const clampedDelta = Math.min(20, Math.max(0, delta))
+    const truncates = clampedDelta !== delta
+    
+    dayEntry.points.push({ timeLabel, delta, clampedDelta, timeDeltaMinutes, truncates, value: val })
+    if (clampedDelta > dayEntry.maxDelta) dayEntry.maxDelta = clampedDelta
+    
 
     dayEntry.lastMinutes = minutesFromMidnight
+   
     lastNumeric = val
   }
-  console.log(Array.from(dailyMap.values()))
+  // console.log(Array.from(dailyMap.values()))
   return Array.from(dailyMap.values())
 }
 
@@ -289,9 +316,7 @@ onMounted(() => {
   <main class="container">
     <header class="header">
       <!-- <h1>GG Tables</h1> -->
-      <div class="controls">
-        <button @click="fetchTables; fetchTopPlayers('PLO___050100')" :disabled="loading || topPlayersLoading">{{ loading ? 'Loading…' : 'Reload' }}</button>
-      </div>
+    
     </header>
 
     <section class="status" v-if="error">
@@ -320,6 +345,9 @@ onMounted(() => {
     </section> -->
 
         <section class="plo-tables">
+          <div class="controls">
+        <button @click="fetchTables" :disabled="loading || topPlayersLoading">{{ loading ? 'Loading…' : 'Reload' }}</button>
+      </div>
           <!-- <h2>PLO___050100 Table</h2> -->
           <div v-if="ploTables.length === 0" class="muted">No PLO tables.</div>
 
@@ -439,8 +467,9 @@ onMounted(() => {
 
 .sidebar {
   width: 240px;
-  min-width: 200px;
-  background: #243d5a;
+  min-width: 100px;
+  background: #13202f41;
+  /* opacity: 60.8; */
   border: 1px solid #355575;
   border-radius: 8px;
   padding: 0.75rem;
