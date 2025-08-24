@@ -353,7 +353,7 @@ onMounted(() => {
                             class="clickable-name">
                         {{ formatCell(Array.isArray(row) ? row[cIdx] : row[col]) }}
                       </span>
-                      <span v-else>{{ formatCell(Array.isArray(row) ? row[cIdx] : row[col]) }}</span>
+                      <span v-else>{{ Array.isArray(row) ? row[cIdx] : row[col] }}</span>
                     </td>
                   </tr>
                 </tbody>
