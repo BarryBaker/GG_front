@@ -149,43 +149,17 @@ function formatCell(value) {
 }
 
 function tryFormatCustomTimestamp(str) {
-  // New format: YYYY-MM-DD HH:MM(:SS)?
-  let match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/.exec(str)
-  if (match) {
-    const hours = match[4]
-    const minutes = match[5]
-    return `${hours}:${minutes}`
-  }
-  // Backwards compat: ts_YYYY_MM_DD_HHhMM
-  match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
-  if (match) {
-    const hours = match[4]
-    const minutes = match[5]
-    return `${hours}:${minutes}`
+  const ts = parseCustomTimestamp(str)
+  if (ts) {
+    return `${ts.hours}:${ts.minutes}`
   }
   return ''
 }
 
 function formatTimestampForModal(str) {
-  // New format: YYYY-MM-DD HH:MM(:SS)? -> YYYY MM DD HH:MM
-  let match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/.exec(str)
-  if (match) {
-    const year = match[1]
-    const month = match[2]
-    const day = match[3]
-    const hours = match[4]
-    const minutes = match[5]
-    return `${year} ${month} ${day} ${hours}:${minutes}`
-  }
-  // Backwards compat: ts_YYYY_MM_DD_HHhMM
-  match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
-  if (match) {
-    const year = match[1]
-    const month = match[2]
-    const day = match[3]
-    const hours = match[4]
-    const minutes = match[5]
-    return `${year} ${month} ${day} ${hours}:${minutes}`
+  const ts = parseCustomTimestamp(str)
+  if (ts) {
+    return `${ts.year} ${ts.month} ${ts.day} ${ts.hours}:${ts.minutes}`
   }
   return str
 }
@@ -200,6 +174,16 @@ function parseCustomTimestamp(str) {
   match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
   if (match) {
     return { year: match[1], month: match[2], day: match[3], hours: match[4], minutes: match[5] }
+  }
+  // RFC 1123 / HTTP-date, e.g. "Sun, 24 Aug 2025 21:03:24 GMT"
+  const d = new Date(str)
+  if (!isNaN(d.getTime())) {
+    const year = String(d.getUTCFullYear())
+    const month = zeroPad(d.getUTCMonth() + 1)
+    const day = zeroPad(d.getUTCDate())
+    const hours = zeroPad(d.getUTCHours())
+    const minutes = zeroPad(d.getUTCMinutes())
+    return { year, month, day, hours, minutes }
   }
   return null
 }
