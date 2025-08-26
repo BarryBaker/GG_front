@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import ct from 'countries-and-timezones'
+import * as ct from 'countries-and-timezones'
 
 // const API_BASE_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
 //   ? 'http://localhost:8000'
@@ -170,8 +170,8 @@ function formatTimestampForModal(str) {
 function getCountryCodeFromNameOrCode(countryStr) {
   if (!countryStr) return ''
   const input = String(countryStr).trim()
-  const countries = ct.getCountries && ct.getCountries()
-  if (!countries) return ''
+  const countries = (ct.getCountries && ct.getCountries()) || (ct.getAllCountries && ct.getAllCountries()) || {}
+  if (!countries || Object.keys(countries).length === 0) return ''
   // If already ISO2 code
   const maybeCode = input.toUpperCase()
   if (maybeCode.length === 2 && countries[maybeCode]) return maybeCode
@@ -196,6 +196,7 @@ function formatUtcOffsetLabel(offsetMinutes) {
 function getCountryUtcOffsetLabel(countryStr) {
   try {
     const code = getCountryCodeFromNameOrCode(countryStr)
+   
     if (!code) return ''
     const timezones = ct.getTimezonesForCountry ? ct.getTimezonesForCountry(code) : []
     if (!timezones || timezones.length === 0) return ''
