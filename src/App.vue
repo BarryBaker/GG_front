@@ -1,9 +1,12 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import ct from 'countries-and-timezones'
 
-const API_BASE_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
-  ? 'http://localhost:8000'
-  : 'https://zooming-liberation-production.up.railway.app'
+// const API_BASE_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
+//   ? 'http://localhost:8000'
+//   : 'https://zooming-liberation-production.up.railway.app'
+
+  const API_BASE_URL ='https://zooming-liberation-production.up.railway.app'
 
 const allTables = ref([])
 const ploTables = ref([])
@@ -162,6 +165,46 @@ function formatTimestampForModal(str) {
     return `${ts.year} ${ts.month} ${ts.day} ${ts.hours}:${ts.minutes}`
   }
   return str
+}
+
+function getCountryCodeFromNameOrCode(countryStr) {
+  if (!countryStr) return ''
+  const input = String(countryStr).trim()
+  const countries = ct.getCountries && ct.getCountries()
+  if (!countries) return ''
+  // If already ISO2 code
+  const maybeCode = input.toUpperCase()
+  if (maybeCode.length === 2 && countries[maybeCode]) return maybeCode
+  // Find by name (case-insensitive exact match)
+  const entries = Object.entries(countries)
+  const direct = entries.find(([, c]) => String(c.name).toLowerCase() === input.toLowerCase())
+  if (direct) return direct[0]
+  // Fallback: startsWith match
+  const fuzzy = entries.find(([, c]) => String(c.name).toLowerCase().startsWith(input.toLowerCase()))
+  return fuzzy ? fuzzy[0] : ''
+}
+
+function formatUtcOffsetLabel(offsetMinutes) {
+  if (offsetMinutes === null || offsetMinutes === undefined) return ''
+  const sign = offsetMinutes >= 0 ? '+' : '-'
+  const abs = Math.abs(offsetMinutes)
+  const hh = zeroPad(Math.floor(abs / 60))
+  const mm = zeroPad(abs % 60)
+  return `UTC${sign}${hh}:${mm}`
+}
+
+function getCountryUtcOffsetLabel(countryStr) {
+  try {
+    const code = getCountryCodeFromNameOrCode(countryStr)
+    if (!code) return ''
+    const timezones = ct.getTimezonesForCountry ? ct.getTimezonesForCountry(code) : []
+    if (!timezones || timezones.length === 0) return ''
+    // Average standard offsets (minutes) across country's timezones
+    const avg = Math.round(timezones.reduce((sum, tz) => sum + (tz.utcOffset || 0), 0) / timezones.length)
+    return formatUtcOffsetLabel(avg)
+  } catch (e) {
+    return ''
+  }
 }
 
 function parseCustomTimestamp(str) {
@@ -370,7 +413,14 @@ onMounted(() => {
       <!-- <div v-for="player in playerData" :key="player.name">{{ player }}</div> -->
       <div class="modal-content" @click.stop>
         <div class="modal-header">
-          <h3>Player Data: {{ selectedPlayerName }}</h3>
+          <h3>Player Data: {{ selectedPlayerName }} 
+            <span v-if="playerData && playerData.country" class="country-pill">
+              {{ playerData.country }}
+              <span class="country-offset" v-if="getCountryUtcOffsetLabel(playerData.country)">
+                ({{ getCountryUtcOffsetLabel(playerData.country) }})
+              </span>
+            </span>
+          </h3>
           <button class="close-btn" @click="showPlayerModal = false">&times;</button>
         </div>
         <div class="modal-body">
@@ -560,6 +610,22 @@ th, td {
 
 .modal-header h3 {
   margin: 0;
+}
+
+.country-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 0.8em;
+  color: #cfe7ff;
+  background: #355575;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+}
+
+.country-offset {
+  margin-left: 6px;
+  opacity: 0.85;
 }
 
 .close-btn {
