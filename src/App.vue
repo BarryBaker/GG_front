@@ -14,6 +14,7 @@ const ploDataByTable = ref({})
 const playerData = ref({})
 const showPlayerModal = ref(false)
 const selectedPlayerName = ref('')
+const selectedTable = ref('PLO___050100')
 const currentUtcDateKey = ref('')
 const currentUtcMinutesOfDay = ref(0)
 const topPlayers = ref([])
@@ -39,8 +40,15 @@ async function fetchTables() {
   try {
     const tables = await fetchJSON(`${API_BASE_URL}/tables`)
     allTables.value = Array.isArray(tables) ? tables : []
-    ploTables.value = allTables.value.filter((name) => typeof name === 'string' && name === 'PLO___050100')
+    ploTables.value = allTables.value.filter((name) => typeof name === 'string' && name.toLowerCase().startsWith('plo'))
+    // Set default/selected table
+    if (!selectedTable.value || !ploTables.value.includes(selectedTable.value)) {
+      selectedTable.value = ploTables.value.includes('PLO___050100') ? 'PLO___050100' : (ploTables.value[0] || '')
+    }
     await fetchPloTablesData()
+    if (selectedTable.value) {
+      fetchTopPlayers(selectedTable.value)
+    }
   } catch (e) {
     error.value = e?.message || 'Failed to fetch tables'
   } finally {
@@ -53,7 +61,7 @@ async function fetchPloTablesData() {
     ploTables.value.map(async (name) => {
       try {
         const payload = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(name)}/data`)
-        console.log(payload)
+        console.log(payload, 'payload')
         const normalized = normalizeTablePayload(payload)
         return [name, normalized]
       } catch (e) {
@@ -165,6 +173,38 @@ function formatTimestampForModal(str) {
     return `${ts.year} ${ts.month} ${ts.day} ${ts.hours}:${ts.minutes}`
   }
   return str
+}
+
+function parseNumberLoose(value) {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/,/g, '').trim()
+    const num = parseFloat(cleaned)
+    return Number.isFinite(num) ? num : null
+  }
+  return null
+}
+
+function isRowLive(columns, row) {
+  try {
+    const tsCols = []
+    for (let i = 0; i < columns.length; i++) {
+      const name = columns[i]
+      const ts = parseCustomTimestamp(name)
+      if (ts) tsCols.push({ name, idx: i })
+    }
+    if (tsCols.length < 2) return false
+    const last = tsCols[tsCols.length - 1]
+    const prev = tsCols[tsCols.length - 2]
+    const getVal = (r, colName, idx) => Array.isArray(r) ? r[idx] : r[colName]
+    const vLast = parseNumberLoose(getVal(row, last.name, last.idx))
+    const vPrev = parseNumberLoose(getVal(row, prev.name, prev.idx))
+    if (vLast === null || vPrev === null) return false
+    return vLast > vPrev
+  } catch {
+    return false
+  }
 }
 
 function getCountryCodeFromNameOrCode(countryStr) {
@@ -336,7 +376,6 @@ async function handleNameClick(name, tableName) {
 
 onMounted(() => {
   fetchTables()
-  fetchTopPlayers('PLO___050100')
 })
 </script>
 
@@ -358,12 +397,23 @@ onMounted(() => {
         <div v-else-if="topPlayers.length === 0" class="muted">No players.</div>
         <ul v-else class="players-list">
           <li v-for="name in topPlayers" :key="name">
-            <span class="clickable-name" @click="handleNameClick(name, 'PLO___050100')">{{ name }}</span>
+            <span class="clickable-name" @click="handleNameClick(name, selectedTable)">{{ name }}</span>
           </li>
         </ul>
       </aside>
 
       <section class="content">
+        <nav class="tables-menu" v-if="ploTables.length">
+          <button
+            v-for="t in ploTables"
+            :key="t"
+            class="table-tab"
+            :class="{ active: t === selectedTable }"
+            @click="selectedTable = t; fetchTopPlayers(t)"
+          >
+            {{ t }}
+          </button>
+        </nav>
         <!-- <section class="all-tables">
       <h2>All Tables ({{ allTables.length }})</h2>
       <div v-if="allTables.length === 0" class="muted">No tables found.</div>
@@ -379,18 +429,22 @@ onMounted(() => {
           <!-- <h2>PLO___050100 Table</h2> -->
           <div v-if="ploTables.length === 0" class="muted">No PLO tables.</div>
 
-          <div v-for="tableName in ploTables" :key="tableName" class="table-block">
-            <h3>{{ tableName }}</h3>
+          <div v-for="tableName in ploTables" :key="tableName" v-show="tableName === selectedTable" class="table-block">
+            <!-- <h3>{{ tableName }}</h3> -->
             <div v-if="!(ploDataByTable[tableName] && (ploDataByTable[tableName].rows || []).length > 0)" class="muted">No rows.</div>
             <div v-else class="scroll-x">
               <table>
                 <thead>
                   <tr>
+                    <th>Live</th>
                     <th v-for="(col, cIdx) in (ploDataByTable[tableName]?.columns || [])" :key="cIdx">{{ formatCell(col) }}</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="(row, rIdx) in (ploDataByTable[tableName]?.rows || [])" :key="rIdx">
+                    <td>
+                      <span :class="isRowLive(ploDataByTable[tableName]?.columns || [], row) ? 'live-ind live-yes' : 'live-ind live-no'" aria-label="Live status"></span>
+                    </td>
                     <td v-for="(col, cIdx) in (ploDataByTable[tableName]?.columns || [])" :key="cIdx">
                       <span v-if="cIdx === 0" 
                             @click="handleNameClick(Array.isArray(row) ? row[cIdx] : row[col], tableName)" 
@@ -533,6 +587,27 @@ onMounted(() => {
   flex: 1 1 auto;
 }
 
+.tables-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.table-tab {
+  padding: 4px 8px;
+  border: 1px solid #355575;
+  background: #1b2e45;
+  color: #d4e7ff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.table-tab.active {
+  background: #2d5074;
+  border-color: #4b759a;
+}
+
 .all-tables, .plo-tables {
   margin-top: 1rem;
 }
@@ -575,6 +650,26 @@ th, td {
 .clickable-name:hover {
   color: #2b5e9c;
   text-decoration: none;
+}
+
+/* Live indicator */
+.live-ind {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.live-yes {
+  background: radial-gradient(circle at center, #f691919e 30%, #c36c6ca1 70%);
+  box-shadow: 0 0 6px rgba(255, 97, 97, 0.562);
+}
+
+.live-no {
+  background: linear-gradient(135deg, #3a556d, #2a3e53);
+  opacity: 0.5;
 }
 
 /* Modal Styles */
