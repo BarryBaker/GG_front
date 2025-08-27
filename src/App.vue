@@ -40,8 +40,9 @@ async function fetchTables() {
   error.value = ''
   try {
     const tables = await fetchJSON(`${API_BASE_URL}/tables`)
-    allTables.value = Array.isArray(tables) ? tables : []
-    ploTables.value = allTables.value.filter((name) => typeof name === 'string' && name.toLowerCase().startsWith('plo'))
+    allTables.value = Array.isArray(tables) ? sortTablesByStake(tables) : []
+    console.log(allTables.value, 'allTables')
+    ploTables.value = sortTablesByStake(allTables.value.filter((name) => typeof name === 'string' && name.toLowerCase().startsWith('plo')))
     // Set default/selected table within current group
     const groupTables = ploTables.value.filter((n) => n.startsWith(mainGroup.value))
     if (!selectedTable.value || !groupTables.includes(selectedTable.value)) {
@@ -64,7 +65,7 @@ async function fetchPloTablesData() {
     ploTables.value.map(async (name) => {
       try {
         const payload = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(name)}/data`)
-        console.log(payload, 'payload')
+        // console.log(payload, 'payload')
         const normalized = normalizeTablePayload(payload)
         return [name, normalized]
       } catch (e) {
@@ -82,7 +83,7 @@ async function fetchPloTablesData() {
 async function fetchTopPlayers(tableName) {
   topPlayersLoading.value = true
   try {
-    const res = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(tableName)}/top-players?limit=24`)
+    const res = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(tableName)}/top-players?limit=27`)
     if (Array.isArray(res)) {
       topPlayers.value = res
     } else if (Array.isArray(res?.rows)) {
@@ -264,6 +265,26 @@ const stakesMap = {
   '1020': '$10.00 / $20.00',
 }
 
+const stakeOrder = ['001002','002005','005010','010025','025050','050100','12','25','510','1020']
+const stakeOrderIndex = Object.fromEntries(stakeOrder.map((k, i) => [k, i]))
+
+function getTableSuffix(tableName) {
+  if (typeof tableName !== 'string') return ''
+  const m = /^(PLO(?:_[56])?)___(.*)$/.exec(tableName)
+  return m ? m[2] : ''
+}
+
+function sortTablesByStake(tables) {
+  return [...tables].sort((a, b) => {
+    const as = getTableSuffix(a)
+    const bs = getTableSuffix(b)
+    const ai = Object.prototype.hasOwnProperty.call(stakeOrderIndex, as) ? stakeOrderIndex[as] : Number.MAX_SAFE_INTEGER
+    const bi = Object.prototype.hasOwnProperty.call(stakeOrderIndex, bs) ? stakeOrderIndex[bs] : Number.MAX_SAFE_INTEGER
+    if (ai !== bi) return ai - bi
+    return String(a).localeCompare(String(b))
+  })
+}
+
 function formatTableLabel(tableName) {
   if (typeof tableName !== 'string') return tableName
   // Extract suffix after triple underscores and map to pretty stakes label
@@ -385,7 +406,7 @@ async function handleNameClick(name, tableName) {
     if (response && Array.isArray(response.rows) && response.rows.length === 1 && Array.isArray(response.rows[0])) {
       response.rows = response.rows[0]
     }
-    console.log(response)
+  //   console.log(response)
     if (response && Array.isArray(response.rows)) {
       response.rows = response.rows.map(row => row === null ? "0" : row)
     }
@@ -413,6 +434,43 @@ watch(mainGroup, () => {
     fetchTopPlayers(selectedTable.value)
   }
 })
+
+function lockBodyScroll() {
+  try {
+    const scrollY = window.scrollY || window.pageYOffset || 0
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${scrollY}px`
+    document.body.style.left = '0'
+    document.body.style.right = '0'
+    document.body.style.width = '100%'
+    document.body.dataset.scrollY = String(scrollY)
+  } catch {}
+}
+
+function unlockBodyScroll() {
+  try {
+    const stored = document.body.dataset.scrollY || '0'
+    const scrollY = parseInt(stored, 10) || 0
+    document.body.style.position = ''
+    document.body.style.top = ''
+    document.body.style.left = ''
+    document.body.style.right = ''
+    document.body.style.width = ''
+    delete document.body.dataset.scrollY
+    window.scrollTo(0, scrollY)
+  } catch {}
+}
+
+watch(showPlayerModal, (isOpen) => {
+  if (isOpen) lockBodyScroll(); else unlockBodyScroll()
+})
+
+function handleOverlayTouchMove(evt) {
+  // Prevent background scroll on mobile when swiping outside modal content
+  if (evt && evt.target === evt.currentTarget) {
+    evt.preventDefault()
+  }
+}
 </script>
 
 <template>
@@ -504,10 +562,10 @@ watch(mainGroup, () => {
     </div>
 
     <!-- Player Data Modal -->
-    <div v-if="showPlayerModal" class="modal-overlay" @click="showPlayerModal = false">
+    <div v-if="showPlayerModal" class="modal-overlay" @click="showPlayerModal = false" @touchmove.passive="handleOverlayTouchMove">
       <!-- <div>aaaa   {{ playerData.rows }}aaaaa</div> -->
       <!-- <div v-for="player in playerData" :key="player.name">{{ player }}</div> -->
-      <div class="modal-content" @click.stop>
+      <div class="modal-content" @click.stop @touchmove.stop>
         <div class="modal-header">
           <h3>Player Data: {{ selectedPlayerName }} 
             <span v-if="playerData && playerData.country" class="country-pill">
