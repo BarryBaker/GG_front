@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import * as ct from 'countries-and-timezones'
 
 // const API_BASE_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
@@ -15,6 +15,7 @@ const playerData = ref({})
 const showPlayerModal = ref(false)
 const selectedPlayerName = ref('')
 const selectedTable = ref('PLO___050100')
+const mainGroup = ref('PLO')
 const currentUtcDateKey = ref('')
 const currentUtcMinutesOfDay = ref(0)
 const topPlayers = ref([])
@@ -41,9 +42,11 @@ async function fetchTables() {
     const tables = await fetchJSON(`${API_BASE_URL}/tables`)
     allTables.value = Array.isArray(tables) ? tables : []
     ploTables.value = allTables.value.filter((name) => typeof name === 'string' && name.toLowerCase().startsWith('plo'))
-    // Set default/selected table
-    if (!selectedTable.value || !ploTables.value.includes(selectedTable.value)) {
-      selectedTable.value = ploTables.value.includes('PLO___050100') ? 'PLO___050100' : (ploTables.value[0] || '')
+    // Set default/selected table within current group
+    const groupTables = ploTables.value.filter((n) => n.startsWith(mainGroup.value))
+    if (!selectedTable.value || !groupTables.includes(selectedTable.value)) {
+      const fallback = groupTables.includes('PLO___050100') ? 'PLO___050100' : (groupTables[0] || '')
+      selectedTable.value = fallback
     }
     await fetchPloTablesData()
     if (selectedTable.value) {
@@ -248,6 +251,29 @@ function getCountryUtcOffsetLabel(countryStr) {
   }
 }
 
+const stakesMap = {
+  '001002': '$0.01 / $0.02',
+  '002005': '$0.02 / $0.05',
+  '005010': '$0.05 / $0.10',
+  '010025': '$0.10 / $0.25',
+  '025050': '$0.25 / $0.50',
+  '050100': '$0.50 / $1.00',
+  '12': '$1.00 / $2.00',
+  '25': '$2.00 / $5.00',
+  '510': '$5.00 / $10.00',
+  '1020': '$10.00 / $20.00',
+}
+
+function formatTableLabel(tableName) {
+  if (typeof tableName !== 'string') return tableName
+  // Extract suffix after triple underscores and map to pretty stakes label
+  const match = /^(PLO(?:_[56])?)___(.*)$/.exec(tableName)
+  if (!match) return tableName
+  const rest = match[2]
+  const pretty = stakesMap[rest] || rest
+  return `${pretty}`
+}
+
 function parseCustomTimestamp(str) {
   // New format: YYYY-MM-DD HH:MM(:SS)?
   let match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/.exec(str)
@@ -377,6 +403,16 @@ async function handleNameClick(name, tableName) {
 onMounted(() => {
   fetchTables()
 })
+
+watch(mainGroup, () => {
+  const groupTables = ploTables.value.filter((n) => n.startsWith(mainGroup.value))
+  if (!groupTables.includes(selectedTable.value)) {
+    selectedTable.value = groupTables[0] || ''
+  }
+  if (selectedTable.value) {
+    fetchTopPlayers(selectedTable.value)
+  }
+})
 </script>
 
 <template>
@@ -403,15 +439,20 @@ onMounted(() => {
       </aside>
 
       <section class="content">
+        <nav class="groups-menu">
+          <button class="group-tab" :class="{ active: mainGroup === 'PLO' }" @click="mainGroup = 'PLO'">PLO</button>
+          <button class="group-tab" :class="{ active: mainGroup === 'PLO_5' }" @click="mainGroup = 'PLO_5'">PLO-5</button>
+          <button class="group-tab" :class="{ active: mainGroup === 'PLO_6' }" @click="mainGroup = 'PLO_6'">PLO-6</button>
+        </nav>
         <nav class="tables-menu" v-if="ploTables.length">
           <button
-            v-for="t in ploTables"
+            v-for="t in ploTables.filter(n => n.startsWith(mainGroup+'___'))"
             :key="t"
             class="table-tab"
             :class="{ active: t === selectedTable }"
             @click="selectedTable = t; fetchTopPlayers(t)"
           >
-            {{ t }}
+            {{ formatTableLabel(t) }}
           </button>
         </nav>
         <!-- <section class="all-tables">
@@ -429,23 +470,23 @@ onMounted(() => {
           <!-- <h2>PLO___050100 Table</h2> -->
           <div v-if="ploTables.length === 0" class="muted">No PLO tables.</div>
 
-          <div v-for="tableName in ploTables" :key="tableName" v-show="tableName === selectedTable" class="table-block">
+          <div v-for="tableName in ploTables.filter(n => n.startsWith(mainGroup))" :key="tableName" v-show="tableName === selectedTable" class="table-block">
             <!-- <h3>{{ tableName }}</h3> -->
             <div v-if="!(ploDataByTable[tableName] && (ploDataByTable[tableName].rows || []).length > 0)" class="muted">No rows.</div>
             <div v-else class="scroll-x">
-              <table>
+              <table class="compact-table">
                 <thead>
                   <tr>
-                    <th>Live</th>
-                    <th v-for="(col, cIdx) in (ploDataByTable[tableName]?.columns || [])" :key="cIdx">{{ formatCell(col) }}</th>
+                    <th class="live-th">Live</th>
+                    <th v-for="(col, cIdx) in (ploDataByTable[tableName]?.columns || [])" :key="cIdx" :class="cIdx === 0 ? 'name-col' : ''">{{ formatCell(col) }}</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="(row, rIdx) in (ploDataByTable[tableName]?.rows || [])" :key="rIdx">
-                    <td>
+                    <td class="live-td">
                       <span :class="isRowLive(ploDataByTable[tableName]?.columns || [], row) ? 'live-ind live-yes' : 'live-ind live-no'" aria-label="Live status"></span>
                     </td>
-                    <td v-for="(col, cIdx) in (ploDataByTable[tableName]?.columns || [])" :key="cIdx">
+                    <td v-for="(col, cIdx) in (ploDataByTable[tableName]?.columns || [])" :key="cIdx" :class="cIdx === 0 ? 'name-col' : ''">
                       <span v-if="cIdx === 0" 
                             @click="handleNameClick(Array.isArray(row) ? row[cIdx] : row[col], tableName)" 
                             class="clickable-name">
@@ -588,8 +629,8 @@ onMounted(() => {
 }
 
 .tables-menu {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   margin-bottom: 10px;
 }
@@ -601,9 +642,31 @@ onMounted(() => {
   color: #d4e7ff;
   border-radius: 6px;
   cursor: pointer;
+  width: 100%;
+  text-align: center;
 }
 
 .table-tab.active {
+  background: #2d5074;
+  border-color: #4b759a;
+}
+
+.groups-menu {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.group-tab {
+  padding: 6px 10px;
+  border: 1px solid #355575;
+  background: #152436;
+  color: #d4e7ff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.group-tab.active {
   background: #2d5074;
   border-color: #4b759a;
 }
@@ -626,16 +689,31 @@ onMounted(() => {
 }
 
 table {
-  width: 100%;
+  width: max-content;
   border-collapse: collapse;
 }
 
 th, td {
-  text-align: left;
+  text-align: center;
   border: 1px solid #e5e5e5;
   padding: 0.5rem;
   white-space: nowrap;
 }
+.compact-table {
+  table-layout: auto;
+}
+
+.live-th, .live-td {
+  width: 24px;
+  min-width: 24px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.name-col {
+  max-width: 220px;
+}
+
 
 .muted {
   color: #666;
