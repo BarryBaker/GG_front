@@ -416,7 +416,7 @@
           ? minutesFromMidnight
           : Math.max(0, minutesFromMidnight - dayEntry.lastMinutes)
       const timeLabel = `${ts.hours}:${ts.minutes}`
-      const clampedDelta = Math.min(20, Math.max(0, delta))
+      const clampedDelta = Math.min(30, Math.max(0, delta))
       const truncates = clampedDelta !== delta
 
       dayEntry.points.push({
