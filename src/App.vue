@@ -496,8 +496,13 @@
         const [k, v] = seg.split('=')
         if (k && v) params[k.toLowerCase()] = decodeURIComponent(v)
       }
-      if (params.maingroup) mainGroup.value = params.maingroup
       if (params.selectedtable) selectedTable.value = params.selectedtable
+      if (params.maingroup) mainGroup.value = params.maingroup
+      else if (params.selectedtable) {
+        const idx = params.selectedtable.indexOf('___')
+        if (idx > 0) mainGroup.value = params.selectedtable.slice(0, idx)
+      }
+      // console.log(mainGroup.value, 'mainGroup', selectedTable.value, 'selectedTable')
     } catch {}
   }
 
@@ -518,6 +523,7 @@
   })
 
   watch(mainGroup, () => {
+    if (!Array.isArray(allTables.value) || allTables.value.length === 0) return
     const groupTables = allTables.value.filter((n) => n.startsWith(mainGroup.value))
     if (!groupTables.includes(selectedTable.value)) {
       selectedTable.value = groupTables[0] || ''
