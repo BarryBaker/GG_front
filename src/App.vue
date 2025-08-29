@@ -478,7 +478,42 @@
     }
   }
 
+  function applyUrlDefaults() {
+    try {
+      const url = new URL(window.location.href)
+      const params = {}
+      url.searchParams.forEach((v, k) => (params[k.toLowerCase()] = v))
+      const hash = (url.hash || '').replace(/^#/, '')
+      if (hash) {
+        const parts = hash.split(/[&;]/)
+        for (const p of parts) {
+          const [k, v] = p.split('=')
+          if (k) params[k.toLowerCase()] = decodeURIComponent(v || '')
+        }
+      }
+      const segs = (url.pathname || '').split('/').filter(Boolean)
+      for (const seg of segs) {
+        const [k, v] = seg.split('=')
+        if (k && v) params[k.toLowerCase()] = decodeURIComponent(v)
+      }
+      if (params.maingroup) mainGroup.value = params.maingroup
+      if (params.selectedtable) selectedTable.value = params.selectedtable
+    } catch {}
+  }
+
+  function updateUrlFromState() {
+    try {
+      const url = new URL(window.location.href)
+      if (mainGroup.value) url.searchParams.set('maingroup', mainGroup.value)
+      else url.searchParams.delete('maingroup')
+      if (selectedTable.value) url.searchParams.set('selectedtable', selectedTable.value)
+      else url.searchParams.delete('selectedtable')
+      history.replaceState(null, '', url.toString())
+    } catch {}
+  }
+
   onMounted(() => {
+    applyUrlDefaults()
     fetchTables()
   })
 
@@ -490,6 +525,11 @@
     if (selectedTable.value) {
       fetchTopPlayers(selectedTable.value)
     }
+    updateUrlFromState()
+  })
+
+  watch(selectedTable, () => {
+    updateUrlFromState()
   })
 
   function lockBodyScroll() {
