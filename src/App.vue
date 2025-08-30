@@ -57,7 +57,7 @@
           : groupTables[0] || ''
         selectedTable.value = fallback
       }
-      await fetchAllTablesData()
+      await fetchSelectedTableData()
       if (selectedTable.value) {
         fetchTopPlayers(selectedTable.value)
       }
@@ -68,24 +68,16 @@
     }
   }
 
-  async function fetchAllTablesData() {
-    const results = await Promise.all(
-      allTables.value.map(async (name) => {
-        try {
-          const payload = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(name)}/data`)
-          // console.log(payload, 'payload')
-          const normalized = normalizeTablePayload(payload)
-          return [name, normalized]
-        } catch (e) {
-          return [name, { columns: [], rows: [] }]
-        }
-      })
-    )
-    const map = {}
-    for (const [name, table] of results) {
-      map[name] = table
+  async function fetchSelectedTableData(tableName) {
+    const name = tableName || selectedTable.value
+    if (!name) return
+    try {
+      const payload = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(name)}/data`)
+      const normalized = normalizeTablePayload(payload)
+      allDataByTable.value = { ...allDataByTable.value, [name]: normalized }
+    } catch (e) {
+      allDataByTable.value = { ...allDataByTable.value, [name]: { columns: [], rows: [] } }
     }
-    allDataByTable.value = map
   }
 
   async function fetchTopPlayers(tableName) {
@@ -112,6 +104,7 @@
   function handleTableClick(tableName) {
     selectedTable.value = tableName
     fetchTopPlayers(tableName)
+    fetchSelectedTableData(tableName)
   }
 
   function normalizeTablePayload(payload) {
@@ -530,6 +523,7 @@
     }
     if (selectedTable.value) {
       fetchTopPlayers(selectedTable.value)
+      fetchSelectedTableData(selectedTable.value)
     }
     updateUrlFromState()
   })
