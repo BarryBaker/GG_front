@@ -754,6 +754,7 @@
             v-if="playerData && playerData.columns && playerData.rows && playerData.rows.length > 0"
             class="charts"
           >
+            <div class="muted" style="margin-bottom: 8px;">Hint: Hover over a bar to see time, Δ, and total points.</div>
             <div v-for="day in computeDailyDeltas(playerData)" :key="day.dateKey" class="day-chart">
               <div class="day-header">{{ day.dateLabel }}</div>
               <div class="bar-chart">
