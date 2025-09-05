@@ -5,7 +5,9 @@
 
   const API_BASE_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
     ? 'http://localhost:8000'
-    : 'https://zooming-liberation-production.up.railway.app'
+    : 'https://soothing-alignment-production.up.railway.app'
+
+    
 
   // const API_BASE_URL = 'https://zooming-liberation-production.up.railway.app'
 
