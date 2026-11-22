@@ -1,13 +1,13 @@
 <script setup>
-  import * as ct from 'countries-and-timezones'
-
   import { onMounted, ref, watch } from 'vue'
 
-  const API_BASE_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
-    ? 'http://localhost:8000'
-    : 'https://soothing-alignment-production.up.railway.app'
+  import PlayerDataModal from './components/PlayerDataModal.vue'
 
-    
+  const API_BASE_URL =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? 'http://localhost:18000'
+      : 'https://85-190-101-59.sslip.io'
 
   // const API_BASE_URL = 'https://zooming-liberation-production.up.railway.app'
 
@@ -18,10 +18,9 @@
   const playerData = ref({})
   const showPlayerModal = ref(false)
   const selectedPlayerName = ref('')
+  const selectedPlayerCountry = ref('')
   const selectedTable = ref('PLO___050100')
   const mainGroup = ref('PLO')
-  const currentUtcDateKey = ref('')
-  const currentUtcMinutesOfDay = ref(0)
   const topPlayers = ref([])
   const topPlayersLoading = ref(false)
   const loading = ref(false)
@@ -75,6 +74,7 @@
     if (!name) return
     try {
       const payload = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(name)}/data`)
+      console.log(payload, 'payload for', name)
       const normalized = normalizeTablePayload(payload)
       allDataByTable.value = { ...allDataByTable.value, [name]: normalized }
     } catch (e) {
@@ -185,14 +185,6 @@
     return ''
   }
 
-  function formatTimestampForModal(str) {
-    const ts = parseCustomTimestamp(str)
-    if (ts) {
-      return `${ts.year} ${ts.month} ${ts.day} ${ts.hours}:${ts.minutes}`
-    }
-    return str
-  }
-
   function parseNumberLoose(value) {
     if (value === null || value === undefined) return null
     if (typeof value === 'number') return Number.isFinite(value) ? value : null
@@ -225,75 +217,54 @@
     }
   }
 
-  function getCountryCodeFromNameOrCode(countryStr) {
-    if (!countryStr) return ''
-    const input = String(countryStr).trim()
-    const countries =
-      (ct.getCountries && ct.getCountries()) || (ct.getAllCountries && ct.getAllCountries()) || {}
-    if (!countries || Object.keys(countries).length === 0) return ''
-    // If already ISO2 code
-    const maybeCode = input.toUpperCase()
-    if (maybeCode.length === 2 && countries[maybeCode]) return maybeCode
-    // Find by name (case-insensitive exact match)
-    const entries = Object.entries(countries)
-    const direct = entries.find(([, c]) => String(c.name).toLowerCase() === input.toLowerCase())
-    if (direct) return direct[0]
-    // Fallback: startsWith match
-    const fuzzy = entries.find(([, c]) =>
-      String(c.name).toLowerCase().startsWith(input.toLowerCase())
-    )
-    return fuzzy ? fuzzy[0] : ''
-  }
-
-  function formatUtcOffsetLabel(offsetMinutes) {
-    if (offsetMinutes === null || offsetMinutes === undefined) return ''
-    const sign = offsetMinutes >= 0 ? '+' : '-'
-    const abs = Math.abs(offsetMinutes)
-    const hh = zeroPad(Math.floor(abs / 60))
-    const mm = zeroPad(abs % 60)
-    return `UTC${sign}${hh}:${mm}`
-  }
-
-  function getCountryUtcOffsetLabel(countryStr) {
-    try {
-      const code = getCountryCodeFromNameOrCode(countryStr)
-
-      if (!code) return ''
-      const timezones = ct.getTimezonesForCountry ? ct.getTimezonesForCountry(code) : []
-      if (!timezones || timezones.length === 0) return ''
-      // Average standard offsets (minutes) across country's timezones
-      const avg = Math.round(
-        timezones.reduce((sum, tz) => sum + (tz.utcOffset || 0), 0) / timezones.length
-      )
-      return formatUtcOffsetLabel(avg)
-    } catch (e) {
-      return ''
-    }
-  }
-
   const stakesMap = {
+    '025': '$0.25',
+    1: '1',
+    3: '3',
+    5: '5',
+    10: '10',
+    20: '20',
+    50: '50',
+    100: '100',
+    200: '200',
     '001002': '$0.01 / $0.02',
     '002005': '$0.02 / $0.05',
     '005010': '$0.05 / $0.10',
+    '010020': '$0.10 / $0.20',
     '010025': '$0.10 / $0.25',
+    '020040': '$0.20 / $0.40',
     '025050': '$0.25 / $0.50',
     '050100': '$0.50 / $1.00',
     '0501': '$0.50 / $1.00',
     12: '$1.00 / $2.00',
+    24: '$2.00 / $4.00',
     25: '$2.00 / $5.00',
     510: '$5.00 / $10.00',
     1020: '$10.00 / $20.00',
   }
 
   const stakeOrder = [
+    '025',
+    '1',
+    '3',
+    '5',
+    '10',
+    '20',
+    '50',
+    '100',
+    '200',
     '001002',
     '002005',
     '005010',
+    '010020',
     '010025',
+    '020040',
+
     '025050',
     '050100',
     '0501',
     '12',
+    '24',
     '25',
     '510',
     '1020',
@@ -362,17 +333,6 @@
     return num < 10 ? `0${num}` : String(num)
   }
 
-  function setNowUtc() {
-    const now = new Date()
-    const y = now.getUTCFullYear()
-    const m = zeroPad(now.getUTCMonth() + 1)
-    const d = zeroPad(now.getUTCDate())
-    const hh = now.getUTCHours()
-    const mm = now.getUTCMinutes()
-    currentUtcDateKey.value = `${y}-${m}-${d}`
-    currentUtcMinutesOfDay.value = hh * 60 + mm
-  }
-
   // function normalizeNumber(value) {
   //   if (value === null || value === undefined) return null
   //   if (typeof value === 'number') return value
@@ -384,87 +344,16 @@
   //   return null
   // }
 
-  function computeDailyDeltas(pd) {
-    if (!pd || !Array.isArray(pd.columns) || !Array.isArray(pd.rows)) return []
-    let lastNumeric = 0
-    const dailyMap = new Map()
-
-    for (let i = 0; i < pd.columns.length; i++) {
-      const col = pd.columns[i]
-      const ts = parseCustomTimestamp(col)
-      if (!ts) continue
-      const val = pd.rows[i]
-
-      const minutesFromMidnight = parseInt(ts.hours, 10) * 60 + parseInt(ts.minutes, 10)
-      const dateKey = `${ts.year}-${ts.month}-${ts.day}`
-      const dateLabel = `${ts.year} ${ts.month} ${ts.day}`
-      let dayEntry = dailyMap.get(dateKey)
-      if (!dayEntry) {
-        dayEntry = { dateKey, dateLabel, points: [], maxDelta: 0, lastMinutes: null }
-        dailyMap.set(dateKey, dayEntry)
-      }
-
-      const delta = val - lastNumeric
-
-      const timeDeltaMinutes =
-        dayEntry.lastMinutes === null
-          ? minutesFromMidnight
-          : Math.max(0, minutesFromMidnight - dayEntry.lastMinutes)
-      const timeLabel = `${ts.hours}:${ts.minutes}`
-      const clampedDelta = Math.min(30, Math.max(0, delta))
-      const truncates = clampedDelta !== delta
-
-      dayEntry.points.push({
-        timeLabel,
-        delta,
-        clampedDelta,
-        timeDeltaMinutes,
-        truncates,
-        value: val,
-      })
-      if (clampedDelta > dayEntry.maxDelta) dayEntry.maxDelta = clampedDelta
-
-      dayEntry.lastMinutes = minutesFromMidnight
-
-      lastNumeric = val
-    }
-    // console.log(Array.from(dailyMap.values()))
-    return Array.from(dailyMap.values())
-  }
-
-  function transposePlayerData(data) {
-    if (!data || !data.columns || !data.rows || data.rows.length < 2) return []
-
-    const [playerRow, pointsRow] = data.rows
-    const timestamps = data.columns.filter((key) => key !== 'name' && key !== 'created_at')
-    const values = timestamps.map((ts) => pointsRow[ts])
-
-    return timestamps.map((ts, index) => ({
-      timestamp: formatTimestampForModal(ts),
-      value: values[index],
-    }))
-  }
-
   async function handleNameClick(name, tableName) {
     try {
       const response = await fetchJSON(
         `${API_BASE_URL}/tables/${encodeURIComponent(tableName)}/player?name=${encodeURIComponent(name)}`
       )
-      if (
-        response &&
-        Array.isArray(response.rows) &&
-        response.rows.length === 1 &&
-        Array.isArray(response.rows[0])
-      ) {
-        response.rows = response.rows[0]
-      }
-      //   console.log(response)
-      if (response && Array.isArray(response.rows)) {
-        response.rows = response.rows.map((row) => (row === null ? '0' : row))
-      }
-      playerData.value = response
-      selectedPlayerName.value = name
-      setNowUtc()
+      // console.log('Player data response:', response)
+
+      playerData.value = response.datapoints
+      selectedPlayerName.value = response.player
+      selectedPlayerCountry.value = response.country || ''
       showPlayerModal.value = true
       // console.log('Player data received:', response)
     } catch (e) {
@@ -533,44 +422,6 @@
   watch(selectedTable, () => {
     updateUrlFromState()
   })
-
-  function lockBodyScroll() {
-    try {
-      const scrollY = window.scrollY || window.pageYOffset || 0
-      document.body.style.position = 'fixed'
-      document.body.style.top = `-${scrollY}px`
-      document.body.style.left = '0'
-      document.body.style.right = '0'
-      document.body.style.width = '100%'
-      document.body.dataset.scrollY = String(scrollY)
-    } catch {}
-  }
-
-  function unlockBodyScroll() {
-    try {
-      const stored = document.body.dataset.scrollY || '0'
-      const scrollY = parseInt(stored, 10) || 0
-      document.body.style.position = ''
-      document.body.style.top = ''
-      document.body.style.left = ''
-      document.body.style.right = ''
-      document.body.style.width = ''
-      delete document.body.dataset.scrollY
-      window.scrollTo(0, scrollY)
-    } catch {}
-  }
-
-  watch(showPlayerModal, (isOpen) => {
-    if (isOpen) lockBodyScroll()
-    else unlockBodyScroll()
-  })
-
-  function handleOverlayTouchMove(evt) {
-    // Prevent background scroll on mobile when swiping outside modal content
-    if (evt && evt.target === evt.currentTarget) {
-      evt.preventDefault()
-    }
-  }
 </script>
 
 <template>
@@ -634,6 +485,43 @@
           >
             PLO-6
           </button>
+          <button
+            class="group-tab"
+            :class="{ active: mainGroup === 'Omaha_RUSH' }"
+            @click="mainGroup = 'Omaha_RUSH'"
+          >
+            Omaha RUSH
+          </button>
+          <button
+            class="group-tab"
+            :class="{ active: mainGroup === 'Holdem_RUSH' }"
+            @click="mainGroup = 'Holdem_RUSH'"
+          >
+            Hold'em Rush
+          </button>
+          <!-- <button
+            class="group-tab"
+            :class="{ active: mainGroup === 'Holdem_AOF' }"
+            @click="mainGroup = 'Holdem_AOF'"
+          >
+            Hold'em AOF
+          </button>
+          <button
+            class="group-tab"
+            :class="{ active: mainGroup === 'Omaha_AOF' }"
+            @click="mainGroup = 'Omaha_AOF'"
+          >
+            Omaha AOF
+          </button> -->
+          <!-- <button
+            class="group-tab"
+            :class="{
+              active: mainGroup === '3MAX_and_6MAX_will_share_a_single_leaderboard_SPIN_GOLD',
+            }"
+            @click="mainGroup = '3MAX_and_6MAX_will_share_a_single_leaderboard_SPIN_GOLD'"
+          >
+            Spin gold
+          </button> -->
         </nav>
         <nav class="tables-menu" v-if="allTables.length">
           <button
@@ -729,74 +617,13 @@
       </section>
     </div>
 
-    <!-- Player Data Modal -->
-    <div
+    <PlayerDataModal
       v-if="showPlayerModal"
-      class="modal-overlay"
-      @click="showPlayerModal = false"
-      @touchmove.passive="handleOverlayTouchMove"
-    >
-      <!-- <div>aaaa   {{ playerData.rows }}aaaaa</div> -->
-      <!-- <div v-for="player in playerData" :key="player.name">{{ player }}</div> -->
-      <div class="modal-content" @click.stop @touchmove.stop>
-        <div class="modal-header">
-          <h3>
-            Player Data: {{ selectedPlayerName }}
-            <span v-if="playerData && playerData.country" class="country-pill">
-              {{ playerData.country }}
-              <span class="country-offset" v-if="getCountryUtcOffsetLabel(playerData.country)">
-                ({{ getCountryUtcOffsetLabel(playerData.country) }})
-              </span>
-            </span>
-          </h3>
-          <button class="close-btn" @click="showPlayerModal = false">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div
-            v-if="playerData && playerData.columns && playerData.rows && playerData.rows.length > 0"
-            class="charts"
-          >
-            <div class="muted" style="margin-bottom: 8px;">Hint: Hover over a bar to see time, Δ, and total points.</div>
-            <div v-for="day in computeDailyDeltas(playerData)" :key="day.dateKey" class="day-chart">
-              <div class="day-header">{{ day.dateLabel }}</div>
-              <div class="bar-chart">
-                <div class="bar-chart-content">
-                  <div class="eight-line" :style="{ left: ((8 * 60) / 1440) * 100 + '%' }"></div>
-                  <div
-                    v-for="(pt, i) in day.points"
-                    :key="i"
-                    class="bar-column"
-                    :title="pt.timeLabel + ' Δ ' + pt.delta + ' total ' + pt.value"
-                    :style="{ width: ((pt.timeDeltaMinutes || 0) / 1440) * 100 + '%' }"
-                  >
-                    <div
-                      class="bar"
-                      :style="{
-                        height:
-                          (day.maxDelta ? ((pt.clampedDelta || 0) / day.maxDelta) * 120 : 0) + 'px',
-                        background: pt.truncates ? '#3576a6' : '#4ea1d3',
-                      }"
-                    ></div>
-                    <!-- <div v-if="i % 30 === 0" class="bar-label">{{ pt.timeLabel }}</div> -->
-                  </div>
-                  <div
-                    v-if="day.dateKey === currentUtcDateKey"
-                    class="now-line"
-                    :style="{ left: (currentUtcMinutesOfDay / 1440) * 100 + '%' }"
-                  ></div>
-                </div>
-              </div>
-              <div class="hours-labels">
-                <span v-for="h in 24" :key="h - 1" class="hour-cell">
-                  {{ h - 1 }}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div v-else class="muted">No player data available.</div>
-        </div>
-      </div>
-    </div>
+      :player-data="playerData"
+      :player-name="selectedPlayerName"
+      :country="selectedPlayerCountry"
+      @close="showPlayerModal = false"
+    />
   </main>
 </template>
 
@@ -997,192 +824,5 @@
   .live-no {
     background: linear-gradient(135deg, #3a556d, #2a3e53);
     opacity: 0.5;
-  }
-
-  /* Modal Styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-
-  .modal-content {
-    background: rgb(30, 30, 56);
-    border-radius: 8px;
-    min-width: 90vw;
-    max-height: 120vh;
-    overflow: hidden;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  }
-
-  .modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1rem;
-    border-bottom: 1px solid #e5e5e5;
-    background: #2d5074;
-  }
-
-  .modal-header h3 {
-    margin: 0;
-  }
-
-  .country-pill {
-    display: inline-block;
-    margin-left: 8px;
-    padding: 2px 6px;
-    font-size: 0.8em;
-    color: #cfe7ff;
-    background: #355575;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 999px;
-  }
-
-  .country-offset {
-    margin-left: 6px;
-    opacity: 0.85;
-  }
-
-  .close-btn {
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    cursor: pointer;
-    padding: 0;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-  }
-
-  .close-btn:hover {
-    background: #e5e5e5;
-  }
-
-  .modal-body {
-    padding: 1rem;
-    max-height: 70vh;
-    overflow-y: auto;
-  }
-
-  .player-data-table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  .player-data-table th,
-  .player-data-table td {
-    text-align: left;
-    border: 1px solid #e5e5e5;
-    padding: 0.5rem;
-    white-space: nowrap;
-  }
-
-  .player-data-table th {
-    background: #1e364e;
-    font-weight: 600;
-  }
-
-  .bar-label {
-    /* position: absolute; */
-    /* top: calc(100%); */
-    /* left: 50%; */
-    /* transform: translateX(-50%); */
-    font-size: 10px;
-    color: #ccc;
-    pointer-events: none;
-  }
-
-  /* Charts */
-  .charts {
-    display: flex;
-    flex-direction: column;
-    /* gap: 1.5rem; */
-  }
-
-  .day-header {
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-  }
-
-  .bar-chart {
-    display: block;
-    overflow-x: auto;
-    padding-bottom: 8px;
-  }
-
-  .bar-chart-content {
-    position: relative;
-    display: inline-flex;
-    align-items: flex-end;
-    gap: 0px;
-    height: 140px;
-    min-width: 100%;
-  }
-
-  .bar-column {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    /* width: 8px; */
-    position: relative;
-  }
-
-  .bar {
-    width: 100%;
-    background: #4ea1d3;
-    border-radius: 2px 2px 0 0;
-  }
-
-  .now-line {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: #ffcc66;
-    box-shadow: 0 0 2px rgba(255, 204, 102, 0.8);
-    z-index: 2;
-  }
-
-  .eight-line {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: rgba(60, 100, 150, 0.5);
-    z-index: 1;
-  }
-
-  /* Hours strip below each day chart */
-  .hours-labels {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 8px;
-    font-size: 12px;
-    color: #c9d6e9;
-    background: #25466b;
-    border: 1px solid #3a5a82;
-    border-radius: 4px;
-    padding: 4px 6px;
-  }
-
-  .hour-cell {
-    flex: 1 1 0;
-    text-align: center;
-    border-right: 1px solid #3a5a82;
-  }
-
-  .hour-cell:last-child {
-    border-right: none;
   }
 </style>
