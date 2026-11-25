@@ -3,13 +3,14 @@
 
   import PlayerDataModal from './components/PlayerDataModal.vue'
 
-  const API_BASE_URL =
+  const isLocalHost =
     typeof window !== 'undefined' &&
     (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-      ? 'http://localhost:18000'
+  const API_BASE_URL = import.meta.env.DEV
+    ? '/api'
+    : isLocalHost
+      ? 'http://127.0.0.1:18000'
       : 'https://85-190-101-59.sslip.io'
-
-  // const API_BASE_URL = 'https://zooming-liberation-production.up.railway.app'
 
   const allTables = ref([])
   // const ploTables = ref([])
