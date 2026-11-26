@@ -1,224 +1,35 @@
 <script setup>
-  import { onMounted, ref, watch } from 'vue'
+  import { computed, onMounted, ref, watch } from 'vue'
 
+  import AppDialog from './components/AppDialog.vue'
   import PlayerDataModal from './components/PlayerDataModal.vue'
 
-  const isLocalHost =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname)
   const API_BASE_URL = import.meta.env.DEV
     ? '/api'
     : isLocalHost
       ? 'http://127.0.0.1:18000'
       : 'https://85-190-101-59.sslip.io'
 
-  const allTables = ref([])
-  // const ploTables = ref([])
-  // const ploDataByTable = ref({})
-  const allDataByTable = ref({})
-  const playerData = ref({})
-  const showPlayerModal = ref(false)
-  const selectedPlayerName = ref('')
-  const selectedPlayerCountry = ref('')
-  const selectedTable = ref('PLO___050100')
-  const mainGroup = ref('PLO')
-  const topPlayers = ref([])
-  const topPlayersLoading = ref(false)
-  const loading = ref(false)
-  const error = ref('')
-
-  async function fetchJSON(url, options = {}) {
-    const response = await fetch(url, {
-      headers: { Accept: 'application/json' },
-      ...options,
-    })
-    if (!response.ok) {
-      const text = await response.text().catch(() => '')
-      throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`)
-    }
-    return response.json()
+  const gameLabels = {
+    Holdem: 'Hold’em',
+    '9Max_Ante_Games': 'Hold’em 9-Max',
+    PLO: 'PLO',
+    PLO_5: 'PLO-5',
+    PLO_6: 'PLO-6',
+    Omaha_RUSH: 'Omaha Rush',
+    Holdem_RUSH: 'Hold’em Rush',
+    Holdem_AOF: 'Hold’em AOF',
+    Omaha_AOF: 'Omaha AOF',
+    '3MAX_and_6MAX_will_share_a_single_leaderboard_SPIN_GOLD': 'Spin & Gold',
   }
+  const unlistedGames = new Set([
+    'Holdem_AOF',
+    'Omaha_AOF',
+    '3MAX_and_6MAX_will_share_a_single_leaderboard_SPIN_GOLD',
+  ])
 
-  async function fetchTables() {
-    loading.value = true
-    error.value = ''
-    try {
-      const tables = await fetchJSON(`${API_BASE_URL}/tables`)
-      allTables.value = Array.isArray(tables) ? sortTablesByStake(tables) : []
-      console.log(allTables.value, 'allTables')
-      // ploTables.value = sortTablesByStake(
-      //   allTables.value.filter(
-      //     (name) => typeof name === 'string' && name.toLowerCase().startsWith('plo')
-      //   )
-      // )
-      // Set default/selected table within current group
-      const groupTables = allTables.value.filter((n) => n.startsWith(mainGroup.value))
-      if (!selectedTable.value || !groupTables.includes(selectedTable.value)) {
-        const fallback = groupTables.includes('PLO___050100')
-          ? 'PLO___050100'
-          : groupTables[0] || ''
-        selectedTable.value = fallback
-      }
-      await fetchSelectedTableData()
-      if (selectedTable.value) {
-        fetchTopPlayers(selectedTable.value)
-      }
-    } catch (e) {
-      error.value = e?.message || 'Failed to fetch tables'
-    } finally {
-      loading.value = false
-    }
-  }
-
-  async function fetchSelectedTableData(tableName) {
-    const name = tableName || selectedTable.value
-    if (!name) return
-    try {
-      const payload = await fetchJSON(`${API_BASE_URL}/tables/${encodeURIComponent(name)}/data`)
-      console.log(payload, 'payload for', name)
-      const normalized = normalizeTablePayload(payload)
-      allDataByTable.value = { ...allDataByTable.value, [name]: normalized }
-    } catch (e) {
-      allDataByTable.value = { ...allDataByTable.value, [name]: { columns: [], rows: [] } }
-    }
-  }
-
-  async function fetchTopPlayers(tableName) {
-    topPlayersLoading.value = true
-    try {
-      const res = await fetchJSON(
-        `${API_BASE_URL}/tables/${encodeURIComponent(tableName)}/top-players?limit=27`
-      )
-      if (Array.isArray(res)) {
-        topPlayers.value = res
-      } else if (Array.isArray(res?.rows)) {
-        topPlayers.value = res.rows
-      } else {
-        topPlayers.value = []
-      }
-    } catch (e) {
-      // don't block main UI on this error; surface quietly
-      console.error('Failed to fetch top players:', e)
-    } finally {
-      topPlayersLoading.value = false
-    }
-  }
-
-  function handleTableClick(tableName) {
-    selectedTable.value = tableName
-    fetchTopPlayers(tableName)
-    fetchSelectedTableData(tableName)
-  }
-
-  function normalizeTablePayload(payload) {
-    // Case 1: { columns: [...], rows: [...] }
-    if (payload && Array.isArray(payload.columns) && Array.isArray(payload.rows)) {
-      const columns = payload.columns
-      const rows = payload.rows
-      // If rows are objects, convert to arrays aligned with columns
-      if (rows.length > 0 && !Array.isArray(rows[0]) && typeof rows[0] === 'object') {
-        const normalizedRows = rows.map((row) => columns.map((col) => row?.[col]))
-        return { columns, rows: normalizedRows }
-      }
-      // If rows are arrays, ensure we have column names; generate if missing
-      const ensuredColumns = columns.length > 0 ? columns : generateColumnNamesFromRows(rows)
-      return { columns: ensuredColumns, rows: rows }
-    }
-
-    // Case 2: payload is an array of objects
-    if (
-      Array.isArray(payload) &&
-      (payload.length === 0 || (typeof payload[0] === 'object' && !Array.isArray(payload[0])))
-    ) {
-      const columns = deriveColumnsFromObjectRows(payload)
-      const rows = payload.map((row) => columns.map((col) => row?.[col]))
-      return { columns, rows }
-    }
-
-    // Case 3: payload with rows field only
-    if (payload && Array.isArray(payload.rows)) {
-      const rows = payload.rows
-      if (rows.length > 0 && Array.isArray(rows[0])) {
-        const columns =
-          Array.isArray(payload.columns) && payload.columns.length > 0
-            ? payload.columns
-            : generateColumnNamesFromRows(rows)
-        return { columns, rows }
-      }
-      if (rows.length > 0 && typeof rows[0] === 'object') {
-        const columns = deriveColumnsFromObjectRows(rows)
-        const normalizedRows = rows.map((row) => columns.map((col) => row?.[col]))
-        return { columns, rows: normalizedRows }
-      }
-    }
-
-    // Fallback: unknown shape
-    return { columns: [], rows: [] }
-  }
-
-  function deriveColumnsFromObjectRows(rows) {
-    const set = new Set()
-    rows.forEach((row) => {
-      Object.keys(row || {}).forEach((k) => set.add(k))
-    })
-    return Array.from(set)
-  }
-
-  function generateColumnNamesFromRows(rows) {
-    const maxLen = rows.reduce((max, r) => Math.max(max, Array.isArray(r) ? r.length : 0), 0)
-    return Array.from({ length: maxLen }, (_, i) => `col_${i}`)
-  }
-
-  function formatCell(value) {
-    if (value === null || value === undefined) return ''
-    if (typeof value === 'object') return JSON.stringify(value)
-    const asString = String(value)
-    const prettyTs = tryFormatCustomTimestamp(asString)
-    if (prettyTs) return prettyTs
-    return asString
-  }
-
-  function tryFormatCustomTimestamp(str) {
-    const ts = parseCustomTimestamp(str)
-    if (ts) {
-      return `${ts.hours}:${ts.minutes}`
-    }
-    return ''
-  }
-
-  function parseNumberLoose(value) {
-    if (value === null || value === undefined) return null
-    if (typeof value === 'number') return Number.isFinite(value) ? value : null
-    if (typeof value === 'string') {
-      const cleaned = value.replace(/,/g, '').trim()
-      const num = parseFloat(cleaned)
-      return Number.isFinite(num) ? num : null
-    }
-    return null
-  }
-
-  function isRowLive(columns, row) {
-    try {
-      const tsCols = []
-      for (let i = 0; i < columns.length; i++) {
-        const name = columns[i]
-        const ts = parseCustomTimestamp(name)
-        if (ts) tsCols.push({ name, idx: i })
-      }
-      if (tsCols.length < 2) return false
-      const last = tsCols[tsCols.length - 1]
-      const prev = tsCols[tsCols.length - 2]
-      const getVal = (r, colName, idx) => (Array.isArray(r) ? r[idx] : r[colName])
-      const vLast = parseNumberLoose(getVal(row, last.name, last.idx))
-      const vPrev = parseNumberLoose(getVal(row, prev.name, prev.idx))
-      if (vLast === null || vPrev === null) return false
-      return vLast > vPrev
-    } catch {
-      return false
-    }
-  }
-
-  const stakesMap = {
+  const stakeLabels = {
     '025': '$0.25',
     1: '1',
     3: '3',
@@ -260,7 +71,6 @@
     '010020',
     '010025',
     '020040',
-
     '025050',
     '050100',
     '0501',
@@ -270,136 +80,307 @@
     '510',
     '1020',
   ]
-  const stakeOrderIndex = Object.fromEntries(stakeOrder.map((k, i) => [k, i]))
+  const stakeOrderIndex = new Map(stakeOrder.map((key, index) => [key, index]))
+  const defaultTable = 'PLO___050100'
+  const topPlayersLimit = 15
+  const pointsFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 20 })
 
-  function getTableSuffix(tableName) {
-    if (typeof tableName !== 'string') return ''
-    const idx = tableName.indexOf('___')
-    return idx >= 0 ? tableName.slice(idx + 3) : tableName
-  }
+  const mainGroup = ref('PLO')
+  const selectedTable = ref(defaultTable)
+  const tableGroups = ref(new Map())
+  const tableData = ref({ columns: [], rows: [] })
+  const topPlayers = ref([])
+  const playerDetails = ref(null)
+  const showHelp = ref(false)
+  const showTopPlayers = ref(false)
+  const gamesLoading = ref(false)
+  const tableLoading = ref(false)
+  const topPlayersLoading = ref(false)
+  const pendingPlayer = ref('')
+  const gamesError = ref('')
+  const tableError = ref('')
+  const topPlayersError = ref('')
+  const playerError = ref('')
+  let tableRequest
+  let topPlayersRequest
+  let playerRequest
 
-  function sortTablesByStake(tables) {
-    return [...tables].sort((a, b) => {
-      const as = getTableSuffix(a)
-      const bs = getTableSuffix(b)
-      const ai = Object.prototype.hasOwnProperty.call(stakeOrderIndex, as)
-        ? stakeOrderIndex[as]
-        : Number.MAX_SAFE_INTEGER
-      const bi = Object.prototype.hasOwnProperty.call(stakeOrderIndex, bs)
-        ? stakeOrderIndex[bs]
-        : Number.MAX_SAFE_INTEGER
-      if (ai !== bi) return ai - bi
-      return String(a).localeCompare(String(b))
+  const games = computed(() => {
+    const available = [...tableGroups.value.keys()].filter(
+      (game) => !unlistedGames.has(game) || game === mainGroup.value
+    )
+    const known = Object.keys(gameLabels).filter((game) => available.includes(game))
+    const added = available.filter((game) => !Object.hasOwn(gameLabels, game))
+    return [...known, ...added.sort((a, b) => a.localeCompare(b))]
+  })
+  const groupTables = computed(() => tableGroups.value.get(mainGroup.value) ?? [])
+
+  const snapshots = computed(() => {
+    const columns = tableData.value.columns.slice(1).map((name, index) => ({
+      name,
+      index: index + 1,
+      time: formatTimestamp(name),
+    }))
+    const timestamps = columns.filter(({ time }) => time)
+    return (timestamps.length ? timestamps : columns).slice(-2)
+  })
+
+  const canCompare = computed(
+    () => snapshots.value.length === 2 && snapshots.value.every(({ time }) => time)
+  )
+
+  const rows = computed(() =>
+    tableData.value.rows.map((row) => {
+      const scores = snapshots.value.map(({ index }) => row[index])
+      const [previous, latest] = scores.map(parsePoints)
+      return {
+        name: row[0],
+        scores,
+        live: canCompare.value && previous !== null && latest !== null && latest > previous,
+      }
     })
+  )
+  const liveCount = computed(() => rows.value.filter(({ live }) => live).length)
+
+  async function fetchJSON(path, signal) {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: { Accept: 'application/json' },
+      signal,
+    })
+    if (!response.ok) throw new Error(`Request failed (${response.status})`)
+    return response.json()
   }
 
-  function formatTableLabel(tableName) {
-    if (typeof tableName !== 'string') return tableName
-    // Extract suffix after triple underscores and map to pretty stakes label
-    const idx = tableName.indexOf('___')
-    const rest = idx >= 0 ? tableName.slice(idx + 3) : tableName
-    // If rest contains a '_', use the string up until that '_'
-    const restUnderscoreIdx = rest.indexOf('_')
-    const restForLabel = restUnderscoreIdx >= 0 ? rest.slice(0, restUnderscoreIdx) : rest
-    const pretty = stakesMap[restForLabel] || restForLabel
-    return `${pretty}`
+  function tablePath(tableName, endpoint) {
+    return `/tables/${encodeURIComponent(tableName)}/${endpoint}`
   }
 
-  function parseCustomTimestamp(str) {
-    // New format: YYYY-MM-DD HH:MM(:SS)?
-    let match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/.exec(str)
-    if (match) {
-      return { year: match[1], month: match[2], day: match[3], hours: match[4], minutes: match[5] }
+  function gameLabel(game) {
+    return Object.hasOwn(gameLabels, game) ? gameLabels[game] : game.replaceAll('_', ' ')
+  }
+
+  function stakeKey(tableName) {
+    return tableName.slice(tableName.indexOf('___') + 3).split('_')[0]
+  }
+
+  function stakeLabel(tableName) {
+    const key = stakeKey(tableName)
+    return Object.hasOwn(stakeLabels, key) ? stakeLabels[key] : key
+  }
+
+  function groupTablesByGame(tables) {
+    const groups = new Map()
+    for (const table of tables) {
+      if (typeof table !== 'string') continue
+      const separator = table.indexOf('___')
+      if (separator < 1 || !table.slice(separator + 3)) continue
+      const game = table.slice(0, separator)
+      if (!groups.has(game)) groups.set(game, [])
+      groups.get(game).push(table)
     }
-    // Backwards compat: ts_YYYY_MM_DD_HHhMM
-    match = /^ts_(\d{4})_(\d{2})_(\d{2})_(\d{2})h(\d{2})$/i.exec(str)
-    if (match) {
-      return { year: match[1], month: match[2], day: match[3], hours: match[4], minutes: match[5] }
+    for (const group of groups.values()) {
+      group.sort(
+        (a, b) =>
+          (stakeOrderIndex.get(stakeKey(a)) ?? Infinity) -
+            (stakeOrderIndex.get(stakeKey(b)) ?? Infinity) || a.localeCompare(b)
+      )
     }
-    // RFC 1123 / HTTP-date, e.g. "Sun, 24 Aug 2025 21:03:24 GMT"
-    const d = new Date(str)
-    if (!isNaN(d.getTime())) {
-      const year = String(d.getUTCFullYear())
-      const month = zeroPad(d.getUTCMonth() + 1)
-      const day = zeroPad(d.getUTCDate())
-      const hours = zeroPad(d.getUTCHours())
-      const minutes = zeroPad(d.getUTCMinutes())
-      return { year, month, day, hours, minutes }
-    }
-    return null
+    return groups
   }
 
-  function zeroPad(n) {
-    const num = typeof n === 'number' ? n : parseInt(String(n), 10)
-    return num < 10 ? `0${num}` : String(num)
+  async function fetchTables() {
+    gamesLoading.value = true
+    gamesError.value = ''
+    try {
+      const tables = await fetchJSON('/tables')
+      tableGroups.value = groupTablesByGame(Array.isArray(tables) ? tables : [])
+      if (!games.value.includes(mainGroup.value)) {
+        mainGroup.value = games.value.includes('PLO') ? 'PLO' : (games.value[0] ?? '')
+      }
+      if (!groupTables.value.includes(selectedTable.value)) {
+        selectedTable.value = groupTables.value.includes(defaultTable)
+          ? defaultTable
+          : (groupTables.value[0] ?? '')
+      }
+      await fetchSelectedTableData()
+    } catch (error) {
+      gamesError.value = `Couldn’t load games and stakes. ${error.message}.`
+    } finally {
+      gamesLoading.value = false
+    }
   }
 
-  // function normalizeNumber(value) {
-  //   if (value === null || value === undefined) return null
-  //   if (typeof value === 'number') return value
-  //   if (typeof value === 'string') {
-  //     const cleaned = value.replace(/,/g, '').trim()
-  //     const num = parseFloat(cleaned)
-  //     return Number.isFinite(num) ? num : null
-  //   }
-  //   return null
-  // }
+  async function fetchSelectedTableData() {
+    tableRequest?.abort()
+    tableError.value = ''
+    tableLoading.value = Boolean(selectedTable.value)
+    if (!selectedTable.value) {
+      tableData.value = { columns: [], rows: [] }
+      return
+    }
 
-  async function handleNameClick(name, tableName) {
+    const request = new AbortController()
+    tableRequest = request
+    try {
+      const payload = await fetchJSON(tablePath(selectedTable.value, 'data'), request.signal)
+      if (!request.signal.aborted) tableData.value = normalizeTablePayload(payload)
+    } catch (error) {
+      if (!request.signal.aborted) {
+        tableError.value = `Couldn’t load leaderboard data. ${error.message}.`
+      }
+    } finally {
+      if (!request.signal.aborted) tableLoading.value = false
+    }
+  }
+
+  function selectGame(game) {
+    if (mainGroup.value === game) return
+    mainGroup.value = game
+    selectTable(groupTables.value[0] ?? '')
+  }
+
+  function selectTable(table) {
+    if (selectedTable.value === table) return
+    selectedTable.value = table
+    fetchSelectedTableData()
+  }
+
+  async function fetchTopPlayers() {
+    topPlayersRequest?.abort()
+    const request = new AbortController()
+    topPlayersRequest = request
+    topPlayersLoading.value = true
+    topPlayersError.value = ''
+    topPlayers.value = []
+    try {
+      const result = await fetchJSON(
+        tablePath(selectedTable.value, `top-players?limit=${topPlayersLimit}`),
+        request.signal
+      )
+      if (!request.signal.aborted) {
+        const names = Array.isArray(result) ? result : result?.rows
+        topPlayers.value = Array.isArray(names) ? names : []
+      }
+    } catch (error) {
+      if (!request.signal.aborted) {
+        topPlayersError.value = `Couldn’t load top players. ${error.message}.`
+      }
+    } finally {
+      if (!request.signal.aborted) topPlayersLoading.value = false
+    }
+  }
+
+  function openTopPlayers() {
+    clearPlayerRequest()
+    showTopPlayers.value = true
+    fetchTopPlayers()
+  }
+
+  function closeTopPlayers() {
+    topPlayersRequest?.abort()
+    clearPlayerRequest()
+    showTopPlayers.value = false
+  }
+
+  function clearPlayerRequest() {
+    playerRequest?.abort()
+    pendingPlayer.value = ''
+    playerError.value = ''
+  }
+
+  async function handleNameClick(name) {
+    clearPlayerRequest()
+    const request = new AbortController()
+    playerRequest = request
+    pendingPlayer.value = name
     try {
       const response = await fetchJSON(
-        `${API_BASE_URL}/tables/${encodeURIComponent(tableName)}/player?name=${encodeURIComponent(name)}`
+        tablePath(selectedTable.value, `player?name=${encodeURIComponent(name)}`),
+        request.signal
       )
-      // console.log('Player data response:', response)
-
-      playerData.value = response.datapoints
-      selectedPlayerName.value = response.player
-      selectedPlayerCountry.value = response.country || ''
-      showPlayerModal.value = true
-      // console.log('Player data received:', response)
-    } catch (e) {
-      console.error('Failed to fetch player data:', e)
-      error.value = `Failed to fetch player data: ${e.message}`
+      if (!request.signal.aborted) {
+        playerDetails.value = {
+          name: response.player || name,
+          data: response.datapoints,
+          country: response.country || '',
+        }
+      }
+    } catch (error) {
+      if (!request.signal.aborted) {
+        playerError.value = `Couldn’t load player activity. ${error.message}.`
+      }
+    } finally {
+      if (!request.signal.aborted) pendingPlayer.value = ''
     }
+  }
+
+  function normalizeTablePayload(payload) {
+    const rows = Array.isArray(payload) ? payload : (payload?.rows ?? [])
+    let columns = Array.isArray(payload?.columns) ? payload.columns : []
+    if (!Array.isArray(rows) || rows.length === 0) return { columns, rows: [] }
+
+    if (Array.isArray(rows[0])) {
+      if (columns.length === 0) {
+        const width = rows.reduce((max, row) => Math.max(max, row?.length ?? 0), 0)
+        columns = Array.from({ length: width }, (_, index) => `col_${index}`)
+      }
+      return { columns, rows }
+    }
+
+    if (columns.length === 0) {
+      columns = [...new Set(rows.flatMap((row) => Object.keys(row ?? {})))]
+    }
+    return { columns, rows: rows.map((row) => columns.map((column) => row?.[column])) }
+  }
+
+  function formatTimestamp(value) {
+    if (typeof value !== 'string') return ''
+    const storedFormat =
+      /^(?:\d{4}-\d{2}-\d{2}[ T]|ts_\d{4}_\d{2}_\d{2}_)(\d{2})[:h](\d{2})(?::\d{2}(?:\.\d+)?)?$/i
+    const match = storedFormat.exec(value)
+    if (match) return `${match[1]}:${match[2]}`
+    if (!/\d{1,2}:\d{2}/.test(value)) return ''
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(11, 16)
+  }
+
+  function parsePoints(value) {
+    if (value === null || value === undefined) return null
+    const points = Number.parseFloat(String(value).replaceAll(',', ''))
+    return Number.isFinite(points) ? points : null
+  }
+
+  function formatPoints(value) {
+    if (value === null || value === undefined || value === '') return '—'
+    return typeof value === 'number' ? pointsFormat.format(value) : value
   }
 
   function applyUrlDefaults() {
     try {
       const url = new URL(window.location.href)
-      const params = {}
-      url.searchParams.forEach((v, k) => (params[k.toLowerCase()] = v))
-      const hash = (url.hash || '').replace(/^#/, '')
-      if (hash) {
-        const parts = hash.split(/[&;]/)
-        for (const p of parts) {
-          const [k, v] = p.split('=')
-          if (k) params[k.toLowerCase()] = decodeURIComponent(v || '')
-        }
+      const params = new Map()
+      url.searchParams.forEach((value, key) => params.set(key.toLowerCase(), value))
+      const hashParts = url.hash.slice(1).split(/[&;]/)
+      const pathParts = url.pathname.split('/').filter(Boolean)
+      for (const part of [...hashParts, ...pathParts]) {
+        const [key, value] = part.split('=')
+        if (key && value) params.set(key.toLowerCase(), decodeURIComponent(value))
       }
-      const segs = (url.pathname || '').split('/').filter(Boolean)
-      for (const seg of segs) {
-        const [k, v] = seg.split('=')
-        if (k && v) params[k.toLowerCase()] = decodeURIComponent(v)
-      }
-      if (params.selectedtable) selectedTable.value = params.selectedtable
-      if (params.maingroup) mainGroup.value = params.maingroup
-      else if (params.selectedtable) {
-        const idx = params.selectedtable.indexOf('___')
-        if (idx > 0) mainGroup.value = params.selectedtable.slice(0, idx)
-      }
-      // console.log(mainGroup.value, 'mainGroup', selectedTable.value, 'selectedTable')
-    } catch {}
+      const table = params.get('selectedtable')
+      if (table) selectedTable.value = table
+      mainGroup.value = params.get('maingroup') || table?.split('___')[0] || mainGroup.value
+    } catch {
+      // Malformed URL parameters do not prevent the default leaderboard from loading.
+    }
   }
 
-  function updateUrlFromState() {
-    try {
-      const url = new URL(window.location.href)
-      if (mainGroup.value) url.searchParams.set('maingroup', mainGroup.value)
-      else url.searchParams.delete('maingroup')
-      if (selectedTable.value) url.searchParams.set('selectedtable', selectedTable.value)
-      else url.searchParams.delete('selectedtable')
-      history.replaceState(null, '', url.toString())
-    } catch {}
+  function syncUrl() {
+    const url = new URL(window.location.href)
+    if (mainGroup.value) url.searchParams.set('maingroup', mainGroup.value)
+    else url.searchParams.delete('maingroup')
+    if (selectedTable.value) url.searchParams.set('selectedtable', selectedTable.value)
+    else url.searchParams.delete('selectedtable')
+    history.replaceState(null, '', url)
   }
 
   onMounted(() => {
@@ -407,423 +388,239 @@
     fetchTables()
   })
 
-  watch(mainGroup, () => {
-    if (!Array.isArray(allTables.value) || allTables.value.length === 0) return
-    const groupTables = allTables.value.filter((n) => n.startsWith(mainGroup.value))
-    if (!groupTables.includes(selectedTable.value)) {
-      selectedTable.value = groupTables[0] || ''
-    }
-    if (selectedTable.value) {
-      fetchTopPlayers(selectedTable.value)
-      fetchSelectedTableData(selectedTable.value)
-    }
-    updateUrlFromState()
-  })
-
-  watch(selectedTable, () => {
-    updateUrlFromState()
-  })
+  watch([mainGroup, selectedTable], syncUrl)
+  watch(selectedTable, clearPlayerRequest)
 </script>
 
 <template>
-  <main class="container">
-    <header class="header">
-      <!-- <h1>GG Tables</h1> -->
-    </header>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <h1 class="brand">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>GG Poker Tracker</span>
+      </h1>
+      <button class="action-button help-button" type="button" @click="showHelp = true">
+        <span class="help-icon" aria-hidden="true">?</span>
+        What’s this?
+      </button>
+    </div>
+  </header>
 
-    <section class="status" v-if="error">
-      <div class="error">{{ error }}</div>
-    </section>
+  <main class="workspace">
+    <div v-if="gamesError" class="notice page-notice" role="alert">{{ gamesError }}</div>
 
-    <div class="layout">
-      <aside class="sidebar">
-        <h3>Top players</h3>
-        <div v-if="topPlayersLoading" class="muted">Loading…</div>
-        <div v-else-if="topPlayers.length === 0" class="muted">No players.</div>
-        <ul v-else class="players-list">
-          <li v-for="name in topPlayers" :key="name">
-            <span class="clickable-name" @click="handleNameClick(name, selectedTable)">{{
-              name
-            }}</span>
-          </li>
-        </ul>
-      </aside>
-
-      <section class="content">
-        <nav class="groups-menu">
+    <div class="dashboard">
+      <section class="filter-panel" aria-labelledby="games-title">
+        <h2 id="games-title" class="panel-label">Games</h2>
+        <nav v-if="games.length" class="filter-list" aria-labelledby="games-title">
           <button
-            class="group-tab"
-            :class="{ active: mainGroup === 'Holdem' }"
-            @click="mainGroup = 'Holdem'"
+            v-for="game in games"
+            :key="game"
+            class="group-tab filter-button"
+            type="button"
+            :aria-pressed="game === mainGroup"
+            :title="gameLabel(game)"
+            @click="selectGame(game)"
           >
-            Holde'em
-          </button>
-          <button
-            class="group-tab"
-            :class="{ active: mainGroup === '9Max_Ante_Games' }"
-            @click="mainGroup = '9Max_Ante_Games'"
-          >
-            Hold'em 9 max
-          </button>
-          <button
-            class="group-tab"
-            :class="{ active: mainGroup === 'PLO' }"
-            @click="mainGroup = 'PLO'"
-          >
-            PLO
-          </button>
-          <button
-            class="group-tab"
-            :class="{ active: mainGroup === 'PLO_5' }"
-            @click="mainGroup = 'PLO_5'"
-          >
-            PLO-5
-          </button>
-          <button
-            class="group-tab"
-            :class="{ active: mainGroup === 'PLO_6' }"
-            @click="mainGroup = 'PLO_6'"
-          >
-            PLO-6
-          </button>
-          <button
-            class="group-tab"
-            :class="{ active: mainGroup === 'Omaha_RUSH' }"
-            @click="mainGroup = 'Omaha_RUSH'"
-          >
-            Omaha RUSH
-          </button>
-          <button
-            class="group-tab"
-            :class="{ active: mainGroup === 'Holdem_RUSH' }"
-            @click="mainGroup = 'Holdem_RUSH'"
-          >
-            Hold'em Rush
-          </button>
-          <!-- <button
-            class="group-tab"
-            :class="{ active: mainGroup === 'Holdem_AOF' }"
-            @click="mainGroup = 'Holdem_AOF'"
-          >
-            Hold'em AOF
-          </button>
-          <button
-            class="group-tab"
-            :class="{ active: mainGroup === 'Omaha_AOF' }"
-            @click="mainGroup = 'Omaha_AOF'"
-          >
-            Omaha AOF
-          </button> -->
-          <!-- <button
-            class="group-tab"
-            :class="{
-              active: mainGroup === '3MAX_and_6MAX_will_share_a_single_leaderboard_SPIN_GOLD',
-            }"
-            @click="mainGroup = '3MAX_and_6MAX_will_share_a_single_leaderboard_SPIN_GOLD'"
-          >
-            Spin gold
-          </button> -->
-        </nav>
-        <nav class="tables-menu" v-if="allTables.length">
-          <button
-            v-for="t in allTables.filter((n) => n.startsWith(mainGroup + '___'))"
-            :key="t"
-            class="table-tab"
-            :class="{ active: t === selectedTable }"
-            @click="handleTableClick(t)"
-          >
-            {{ formatTableLabel(t) }}
+            <span>{{ gameLabel(game) }}</span>
+            <span class="filter-arrow" aria-hidden="true"></span>
           </button>
         </nav>
-        <!-- <section class="all-tables"> 
-      <h2>All Tables ({{ allTables.length }})</h2>
-      <div v-if="allTables.length === 0" class="muted">No tables found.</div>
-      <ul v-else class="table-list">
-        <li v-for="name in allTables" :key="name">{{ name }}</li>
-      </ul>
-    </section> -->
+        <p v-else class="filter-empty">{{ gamesLoading ? 'Loading…' : 'No games available' }}</p>
+      </section>
 
-        <section class="plo-tables">
-          <div class="controls">
-            <button @click="fetchTables" :disabled="loading || topPlayersLoading">
-              {{ loading ? 'Loading…' : 'Reload' }}
+      <section class="filter-panel" aria-labelledby="stakes-title">
+        <h2 id="stakes-title" class="panel-label">Stakes</h2>
+        <nav
+          v-if="groupTables.length"
+          class="filter-list stakes-list"
+          aria-labelledby="stakes-title"
+        >
+          <button
+            v-for="table in groupTables"
+            :key="table"
+            class="table-tab filter-button"
+            type="button"
+            :aria-pressed="table === selectedTable"
+            :title="stakeLabel(table)"
+            @click="selectTable(table)"
+          >
+            <span>{{ stakeLabel(table) }}</span>
+            <span class="filter-arrow" aria-hidden="true"></span>
+          </button>
+        </nav>
+        <p v-else class="filter-empty">{{ gamesLoading ? 'Loading…' : 'No stakes available' }}</p>
+      </section>
+
+      <section class="leaderboard" aria-labelledby="table-title">
+        <header class="table-toolbar">
+          <div class="table-heading">
+            <h2 id="table-title">
+              {{ mainGroup && games.length ? gameLabel(mainGroup) : 'Standings' }}
+              <template v-if="selectedTable && groupTables.includes(selectedTable)">
+                <span class="title-divider" aria-hidden="true"></span>
+                <span class="selected-stake">{{ stakeLabel(selectedTable) }}</span>
+              </template>
+            </h2>
+            <p v-if="rows.length && !tableLoading && !tableError" class="table-summary">
+              {{ rows.length }} {{ rows.length === 1 ? 'player' : 'players' }}
+              <span v-if="canCompare" class="live-summary">
+                <span
+                  class="live-dot"
+                  :class="{ 'is-live': liveCount > 0 }"
+                  aria-hidden="true"
+                ></span>
+                {{ liveCount }} live
+              </span>
+            </p>
+          </div>
+          <div class="table-actions">
+            <button
+              class="action-button action-primary"
+              type="button"
+              aria-label="Reload"
+              title="Reload"
+              :disabled="gamesLoading || tableLoading"
+              @click="fetchTables"
+            >
+              <span class="reload-icon" aria-hidden="true">↻</span>
+              <span class="action-label">Reload</span>
+            </button>
+            <button
+              class="action-button"
+              type="button"
+              aria-label="Top players"
+              title="Top players"
+              :disabled="!groupTables.includes(selectedTable)"
+              @click="openTopPlayers"
+            >
+              <span class="ranking-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="action-label">Top players</span>
             </button>
           </div>
-          <!-- <h2>PLO___050100 Table</h2> -->
-          <div v-if="allTables.length === 0" class="muted">No PLO tables.</div>
+        </header>
 
-          <div
-            v-for="tableName in allTables.filter((n) => n.startsWith(mainGroup))"
-            :key="tableName"
-            v-show="tableName === selectedTable"
-            class="table-block"
-          >
-            <!-- <h3>{{ tableName }}</h3> -->
-            <div
-              v-if="
-                !(allDataByTable[tableName] && (allDataByTable[tableName].rows || []).length > 0)
-              "
-              class="muted"
-            >
-              No rows.
-            </div>
-            <div v-else class="scroll-x">
-              <table class="compact-table">
-                <thead>
-                  <tr>
-                    <th class="live-th">Live</th>
-                    <th
-                      v-for="(col, cIdx) in allDataByTable[tableName]?.columns || []"
-                      :key="cIdx"
-                      :class="cIdx === 0 ? 'name-col' : ''"
-                    >
-                      {{ formatCell(col) }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(row, rIdx) in allDataByTable[tableName]?.rows || []" :key="rIdx">
-                    <td class="live-td">
-                      <span
-                        :class="
-                          isRowLive(allDataByTable[tableName]?.columns || [], row)
-                            ? 'live-ind live-yes'
-                            : 'live-ind live-no'
-                        "
-                        aria-label="Live status"
-                      ></span>
-                    </td>
-                    <td
-                      v-for="(col, cIdx) in allDataByTable[tableName]?.columns || []"
-                      :key="cIdx"
-                      :class="cIdx === 0 ? 'name-col' : ''"
-                    >
-                      <span
-                        v-if="cIdx === 0"
-                        @click="
-                          handleNameClick(Array.isArray(row) ? row[cIdx] : row[col], tableName)
-                        "
-                        class="clickable-name"
-                      >
-                        {{ formatCell(Array.isArray(row) ? row[cIdx] : row[col]) }}
-                      </span>
-                      <span v-else>{{ Array.isArray(row) ? row[cIdx] : row[col] }}</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
+        <div v-if="playerError && !showTopPlayers" class="notice table-notice" role="alert">
+          {{ playerError }}
+        </div>
+
+        <div class="table-viewport" :aria-busy="gamesLoading || tableLoading">
+          <table class="standings">
+            <thead>
+              <tr>
+                <th scope="col" class="live-column">Live</th>
+                <th scope="col" class="player-column">Player</th>
+                <th
+                  v-for="(snapshot, index) in snapshots"
+                  :key="snapshot.index"
+                  scope="col"
+                  class="points-column"
+                  :class="{ 'latest-column': index === snapshots.length - 1 }"
+                  :title="snapshot.name"
+                >
+                  <span class="snapshot-label">
+                    {{ index === snapshots.length - 1 ? 'Latest' : 'Previous' }}
+                  </span>
+                  <span class="snapshot-time">{{ snapshot.time || snapshot.name }}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="gamesLoading || tableLoading || tableError || !rows.length">
+                <td :colspan="2 + snapshots.length" class="table-state">
+                  <p v-if="tableError" role="alert">{{ tableError }}</p>
+                  <p v-else-if="gamesLoading || tableLoading" role="status">Loading leaderboard…</p>
+                  <p v-else-if="gamesError && !games.length">Use Reload to try again.</p>
+                  <p v-else>No leaderboard data available.</p>
+                </td>
+              </tr>
+              <tr
+                v-for="(row, index) in !gamesLoading && !tableLoading && !tableError ? rows : []"
+                :key="index"
+              >
+                <td class="live-column">
+                  <span
+                    class="live-dot"
+                    :class="{ 'is-live': row.live }"
+                    role="img"
+                    :aria-label="
+                      canCompare ? (row.live ? 'Live' : 'No points gained') : 'Status unavailable'
+                    "
+                  ></span>
+                </td>
+                <th class="player-column" scope="row">
+                  <button
+                    v-if="row.name"
+                    class="player-link"
+                    type="button"
+                    :aria-busy="pendingPlayer === row.name"
+                    :title="row.name"
+                    @click="handleNameClick(row.name)"
+                  >
+                    {{ row.name }}
+                  </button>
+                  <span v-else>—</span>
+                </th>
+                <td
+                  v-for="(score, scoreIndex) in row.scores"
+                  :key="scoreIndex"
+                  class="points-column"
+                  :class="{ 'latest-column': scoreIndex === row.scores.length - 1 }"
+                >
+                  {{ formatPoints(score) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
 
+    <AppDialog v-if="showHelp" title="About the tracker" @close="showHelp = false">
+      <div class="help-content">
+        <p>Choose a game and stake to see its leaderboard.</p>
+        <dl>
+          <dt>Live</dt>
+          <dd>A green dot means the player gained points between the two snapshots.</dd>
+          <dt>Player activity</dt>
+          <dd>
+            Select a player’s name in the leaderboard or Top players to see their activity chart.
+          </dd>
+          <dt>Reload</dt>
+          <dd>Fetch the latest available snapshots for the selected leaderboard.</dd>
+        </dl>
+      </div>
+    </AppDialog>
+
+    <AppDialog v-if="showTopPlayers" title="Top players" @close="closeTopPlayers">
+      <template #subtitle>{{ gameLabel(mainGroup) }} · {{ stakeLabel(selectedTable) }}</template>
+      <p v-if="topPlayersLoading" class="dialog-state" role="status">Loading top players…</p>
+      <div v-else-if="topPlayersError" class="dialog-state">
+        <p class="notice" role="alert">{{ topPlayersError }}</p>
+        <button class="action-button" type="button" @click="fetchTopPlayers">Try again</button>
+      </div>
+      <p v-else-if="!topPlayers.length" class="dialog-state">No top players available.</p>
+      <ol v-else class="players-list">
+        <li v-for="name in topPlayers" :key="name">
+          <button
+            class="player-link"
+            type="button"
+            :aria-busy="pendingPlayer === name"
+            @click="handleNameClick(name)"
+          >
+            {{ name }}
+          </button>
+        </li>
+      </ol>
+      <p v-if="playerError" class="notice" role="alert">{{ playerError }}</p>
+    </AppDialog>
+
     <PlayerDataModal
-      v-if="showPlayerModal"
-      :player-data="playerData"
-      :player-name="selectedPlayerName"
-      :country="selectedPlayerCountry"
-      @close="showPlayerModal = false"
+      v-if="playerDetails"
+      :player-data="playerDetails.data"
+      :player-name="playerDetails.name"
+      :country="playerDetails.country"
+      @close="playerDetails = null"
     />
   </main>
 </template>
-
-<style scoped>
-  .container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 2rem;
-  }
-
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 1rem;
-  }
-
-  .controls button {
-    padding: 0.5rem 0.75rem;
-    border: 1px solid #ccc;
-    background: #193880;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  .controls button[disabled] {
-    opacity: 0.6;
-    cursor: default;
-  }
-
-  .status .error {
-    color: #b00020;
-    background: #fde7ea;
-    border: 1px solid #f5c2c7;
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    margin-bottom: 1rem;
-  }
-
-  .layout {
-    display: flex;
-    align-items: flex-start;
-    gap: 1rem;
-  }
-
-  .sidebar {
-    width: 240px;
-    min-width: 100px;
-    background: #13202f41;
-    /* opacity: 60.8; */
-    border: 1px solid #355575;
-    border-radius: 8px;
-    padding: 0.75rem;
-  }
-
-  .sidebar h3 {
-    margin: 0 0 0.5rem 0;
-  }
-
-  .players-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  .players-list li {
-    padding: 4px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .players-list li:last-child {
-    border-bottom: none;
-  }
-
-  .content {
-    flex: 1 1 auto;
-  }
-
-  .tables-menu {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
-    margin-bottom: 10px;
-  }
-
-  .table-tab {
-    padding: 4px 8px;
-    border: 1px solid #355575;
-    background: #1b2e45;
-    color: #d4e7ff;
-    border-radius: 6px;
-    cursor: pointer;
-    width: 100%;
-    text-align: center;
-  }
-
-  .table-tab.active {
-    background: #2d5074;
-    border-color: #4b759a;
-  }
-
-  .groups-menu {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
-
-  .group-tab {
-    padding: 6px 10px;
-    border: 1px solid #355575;
-    background: #152436;
-    color: #d4e7ff;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  .group-tab.active {
-    background: #2d5074;
-    border-color: #4b759a;
-  }
-
-  .all-tables,
-  .plo-tables {
-    margin-top: 1rem;
-  }
-
-  .table-list {
-    list-style: none;
-    padding-left: 1rem;
-  }
-
-  .table-block {
-    margin: 1rem 0 2rem;
-  }
-
-  .scroll-x {
-    overflow-x: auto;
-  }
-
-  table {
-    width: max-content;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    text-align: center;
-    border: 1px solid #e5e5e5;
-    padding: 0.5rem;
-    white-space: nowrap;
-  }
-  .compact-table {
-    table-layout: auto;
-  }
-
-  .live-th,
-  .live-td {
-    width: 24px;
-    min-width: 24px;
-    padding-left: 6px;
-    padding-right: 6px;
-  }
-
-  .name-col {
-    max-width: 220px;
-  }
-
-  .muted {
-    color: #666;
-  }
-
-  .clickable-name {
-    cursor: pointer;
-    color: #4888c9;
-    text-decoration: underline;
-  }
-
-  .clickable-name:hover {
-    color: #2b5e9c;
-    text-decoration: none;
-  }
-
-  /* Live indicator */
-  .live-ind {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    margin-right: 6px;
-    vertical-align: middle;
-  }
-
-  .live-yes {
-    background: radial-gradient(circle at center, #f691919e 30%, #c36c6ca1 70%);
-    box-shadow: 0 0 6px rgba(255, 97, 97, 0.562);
-  }
-
-  .live-no {
-    background: linear-gradient(135deg, #3a556d, #2a3e53);
-    opacity: 0.5;
-  }
-</style>
