@@ -48,7 +48,12 @@
           ...getIntervalStyles(point),
           tooltipText: formatPointTooltip(point),
         }))
-      if (intervals.length) activity.set(timestamp, intervals)
+      if (intervals.length) {
+        activity.set(timestamp, {
+          points: intervals,
+          totalPoints: points[points.length - 1]?.points ?? null,
+        })
+      }
     }
     return activity
   })
@@ -64,10 +69,12 @@
     const firstDay = Math.min(...activity.keys())
     const timelineDays = []
     for (let date = firstDay; date <= currentDay.value; date += millisecondsPerDay) {
+      const dayActivity = activity.get(date)
       timelineDays.push({
         date,
         label: dayFormatter.format(date),
-        points: activity.get(date) ?? [],
+        points: dayActivity?.points ?? [],
+        totalPoints: dayActivity?.totalPoints ?? null,
       })
     }
     return timelineDays
@@ -204,7 +211,10 @@
     </template>
     <div v-if="days.length" class="charts">
       <section v-for="day in days" :key="day.date" class="day-chart">
-        <h3 class="day-header">{{ day.label }}</h3>
+        <h3 class="day-header">
+          {{ day.label }}
+          <span v-if="day.totalPoints !== null"> · {{ day.totalPoints }} total points</span>
+        </h3>
         <div class="timeline">
           <template v-for="(point, index) in day.points" :key="index">
             <div v-if="point.gapStyle" class="data-gap" :style="point.gapStyle"></div>
