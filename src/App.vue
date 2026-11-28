@@ -1,5 +1,5 @@
 <script setup>
-  import { computed, onMounted, ref, watch } from 'vue'
+  import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
   import AppDialog from './components/AppDialog.vue'
   import PlayerDataModal from './components/PlayerDataModal.vue'
@@ -24,9 +24,9 @@
     '3MAX_and_6MAX_will_share_a_single_leaderboard_SPIN_GOLD': 'Spin & Gold',
   }
   const unlistedGames = new Set([
-    'Holdem_AOF',
-    'Omaha_AOF',
-    '3MAX_and_6MAX_will_share_a_single_leaderboard_SPIN_GOLD',
+    // 'Holdem_AOF',
+    // 'Omaha_AOF',
+    // '3MAX_and_6MAX_will_share_a_single_leaderboard_SPIN_GOLD',
   ])
 
   const stakeLabels = {
@@ -83,15 +83,31 @@
   const stakeOrderIndex = new Map(stakeOrder.map((key, index) => [key, index]))
   const defaultTable = 'PLO___050100'
   const topPlayersLimit = 15
+  const topPlayersDateFormat = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
   const pointsFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 20 })
+  const helpPages = [
+    { id: 'about', title: 'About the tracker' },
+    { id: 'tutorial', title: 'Tutorial' },
+  ]
 
   const mainGroup = ref('PLO')
   const selectedTable = ref(defaultTable)
   const tableGroups = ref(new Map())
   const tableData = ref({ columns: [], rows: [] })
   const topPlayers = ref([])
+  const topPlayersDateRange = ref('')
   const playerDetails = ref(null)
   const showHelp = ref(false)
+  const utcTime = ref(new Date().toISOString())
+  const millisecondsPerMinute = 60_000
+  const maxSnapshotGap = 180 * millisecondsPerMinute
+  const leaderboardResetTime = '08:00'
+  let clockTimeout
   const showTopPlayers = ref(false)
   const gamesLoading = ref(false)
   const tableLoading = ref(false)
@@ -116,13 +132,42 @@
   const groupTables = computed(() => tableGroups.value.get(mainGroup.value) ?? [])
 
   const snapshots = computed(() => {
-    const columns = tableData.value.columns.slice(1).map((name, index) => ({
-      name,
-      index: index + 1,
-      time: formatTimestamp(name),
-    }))
+    const columns = tableData.value.columns.slice(1).map((name, index) => {
+      const timestamp = parseSnapshotTimestamp(name)
+      return {
+        name,
+        index: index + 1,
+        timestamp,
+        time: Number.isFinite(timestamp) ? new Date(timestamp).toISOString().slice(11, 16) : '',
+      }
+    })
     const timestamps = columns.filter(({ time }) => time)
-    return (timestamps.length ? timestamps : columns).slice(-2)
+    const recent = (timestamps.length ? timestamps : columns).slice(-2)
+    const [previous, latest] = recent
+    if (!latest || !previous.time || !latest.time) return recent
+
+    const gap = latest.timestamp - previous.timestamp
+    const crossedReset = previous.time < leaderboardResetTime && latest.time > leaderboardResetTime
+    return gap > maxSnapshotGap || crossedReset ? [latest] : recent
+  })
+
+  const snapshotAge = computed(() => {
+    const timestamp = snapshots.value.at(-1)?.timestamp
+    if (
+      gamesLoading.value ||
+      tableLoading.value ||
+      tableError.value ||
+      !Number.isFinite(timestamp)
+    ) {
+      return null
+    }
+
+    const elapsed = Math.max(0, Date.parse(utcTime.value) - timestamp)
+    const minutes = Math.floor(elapsed / millisecondsPerMinute)
+    return {
+      datetime: new Date(timestamp).toISOString(),
+      label: minutes === 0 ? 'Just now' : `${minutes} min ago`,
+    }
   })
 
   const canCompare = computed(
@@ -221,9 +266,17 @@
 
     const request = new AbortController()
     tableRequest = request
+    const query = new URLSearchParams({ limit: String(100) })
     try {
-      const payload = await fetchJSON(tablePath(selectedTable.value, 'data'), request.signal)
-      if (!request.signal.aborted) tableData.value = normalizeTablePayload(payload)
+      const payload = await fetchJSON(
+        tablePath(selectedTable.value, 'data') + `?${query.toString()}`,
+        request.signal
+      )
+      // console.log('Fetched table data:', payload)
+      if (!request.signal.aborted) {
+        tableData.value = normalizeTablePayload(payload)
+        utcTime.value = new Date().toISOString()
+      }
     } catch (error) {
       if (!request.signal.aborted) {
         tableError.value = `Couldn’t load leaderboard data. ${error.message}.`
@@ -252,14 +305,17 @@
     topPlayersLoading.value = true
     topPlayersError.value = ''
     topPlayers.value = []
+    topPlayersDateRange.value = ''
     try {
       const result = await fetchJSON(
         tablePath(selectedTable.value, `top-players?limit=${topPlayersLimit}`),
         request.signal
       )
+      // console.log('Fetched top players:', result)
       if (!request.signal.aborted) {
-        const names = Array.isArray(result) ? result : result?.rows
+        const names = Array.isArray(result) ? result : (result?.players ?? result?.rows)
         topPlayers.value = Array.isArray(names) ? names : []
+        topPlayersDateRange.value = formatTopPlayersDateRange(result?.date_range)
       }
     } catch (error) {
       if (!request.signal.aborted) {
@@ -333,15 +389,25 @@
     return { columns, rows: rows.map((row) => columns.map((column) => row?.[column])) }
   }
 
-  function formatTimestamp(value) {
-    if (typeof value !== 'string') return ''
+  function parseSnapshotTimestamp(value) {
+    if (typeof value !== 'string') return NaN
     const storedFormat =
-      /^(?:\d{4}-\d{2}-\d{2}[ T]|ts_\d{4}_\d{2}_\d{2}_)(\d{2})[:h](\d{2})(?::\d{2}(?:\.\d+)?)?$/i
+      /^(?:ts_)?(\d{4})[-_](\d{2})[-_](\d{2})[ T_](\d{2})[:h](\d{2})(:\d{2}(?:\.\d+)?)?$/i
     const match = storedFormat.exec(value)
-    if (match) return `${match[1]}:${match[2]}`
-    if (!/\d{1,2}:\d{2}/.test(value)) return ''
-    const date = new Date(value)
-    return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(11, 16)
+    if (match) {
+      const [, year, month, day, hour, minute, seconds = ':00'] = match
+      return Date.parse(`${year}-${month}-${day}T${hour}:${minute}${seconds}Z`)
+    }
+    return /\d{1,2}:\d{2}/.test(value) ? Date.parse(value) : NaN
+  }
+
+  function formatTopPlayersDateRange(dateRange) {
+    if (!Array.isArray(dateRange) || dateRange.length !== 2) return ''
+
+    const [start, end] = dateRange.map(parseSnapshotTimestamp)
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return ''
+
+    return `${topPlayersDateFormat.format(start)} - ${topPlayersDateFormat.format(end)}`
   }
 
   function parsePoints(value) {
@@ -383,10 +449,21 @@
     history.replaceState(null, '', url)
   }
 
+  function updateUtcClock() {
+    const now = new Date()
+    utcTime.value = now.toISOString()
+    clockTimeout = window.setTimeout(
+      updateUtcClock,
+      millisecondsPerMinute - (now.getTime() % millisecondsPerMinute)
+    )
+  }
+
   onMounted(() => {
+    updateUtcClock()
     applyUrlDefaults()
     fetchTables()
   })
+  onBeforeUnmount(() => window.clearTimeout(clockTimeout))
 
   watch([mainGroup, selectedTable], syncUrl)
   watch(selectedTable, clearPlayerRequest)
@@ -397,12 +474,18 @@
     <div class="masthead-inner">
       <h1 class="brand">
         <span class="brand-mark" aria-hidden="true"><span></span></span>
-        <span>GG Poker Tracker</span>
+        <span
+          >GG Poker<br />
+          Leaderboard Tracker</span
+        >
       </h1>
-      <button class="action-button help-button" type="button" @click="showHelp = true">
-        <span class="help-icon" aria-hidden="true">?</span>
-        What’s this?
-      </button>
+      <div class="masthead-actions">
+        <button class="action-button help-button" type="button" @click="showHelp = true">
+          <span class="help-icon" aria-hidden="true">?</span>
+          What’s this?
+        </button>
+        <time class="utc-clock" :datetime="utcTime">{{ utcTime.slice(11, 16) }} UTC</time>
+      </div>
     </div>
   </header>
 
@@ -459,7 +542,12 @@
               {{ mainGroup && games.length ? gameLabel(mainGroup) : 'Standings' }}
               <template v-if="selectedTable && groupTables.includes(selectedTable)">
                 <span class="title-divider" aria-hidden="true"></span>
-                <span class="selected-stake">{{ stakeLabel(selectedTable) }}</span>
+                <span class="stake-details">
+                  <span class="selected-stake">{{ stakeLabel(selectedTable) }}</span>
+                  <time v-if="snapshotAge" class="snapshot-age" :datetime="snapshotAge.datetime">{{
+                    snapshotAge.label
+                  }}</time>
+                </span>
               </template>
             </h2>
             <p v-if="rows.length && !tableLoading && !tableError" class="table-summary">
@@ -576,24 +664,84 @@
       </section>
     </div>
 
-    <AppDialog v-if="showHelp" title="About the tracker" @close="showHelp = false">
-      <div class="help-content">
-        <p>Choose a game and stake to see its leaderboard.</p>
-        <dl>
-          <dt>Live</dt>
-          <dd>A green dot means the player gained points between the two snapshots.</dd>
-          <dt>Player activity</dt>
-          <dd>
-            Select a player’s name in the leaderboard or Top players to see their activity chart.
-          </dd>
-          <dt>Reload</dt>
-          <dd>Fetch the latest available snapshots for the selected leaderboard.</dd>
-        </dl>
-      </div>
+    <AppDialog v-if="showHelp" :pages="helpPages" @close="showHelp = false">
+      <template #about>
+        <div class="help-content">
+          <p>
+            See how points change between snapshots on supported GGPoker leaderboards. Choose a game
+            and stake to get started.”
+          </p>
+          <ul>
+            <li>
+              <strong>Live tracking.</strong> Snapshots every few minutes show who’s gaining points.
+            </li>
+            <li>
+              <strong>Player analysis.</strong> See how quickly players earn points and how much
+              they’ve played over time.
+            </li>
+            <li>
+              <strong>Evaluate your position.</strong>
+              <ul>
+                <li>
+                  Could someone overtake you before the day ends? Check when they usually play.
+                </li>
+                <li>
+                  Trying to catch someone ahead? Use their usual schedule and scoring pace to gauge
+                  whether they’ll return and how many points they might add.
+                </li>
+                <li>Estimate a player’s end-of-day total from their scoring pace.</li>
+              </ul>
+            </li>
+            <li>
+              <strong>Spot possible foul play.</strong> Look for unusually high playing volume or
+              activity patterns that could indicate bot use.
+            </li>
+          </ul>
+        </div>
+      </template>
+      <template #tutorial>
+        <div class="help-content">
+          <p>
+            Choose a game under <strong>Games</strong> and a blind level under
+            <strong>Stakes</strong>. The table ranks players by their latest points and shows the
+            previous snapshot when it’s available for comparison.
+          </p>
+          <ul>
+            <li>
+              <strong>Check update times.</strong> The gap between the Previous and Latest
+              timestamps gives you a rough idea of when the next snapshot may arrive.
+            </li>
+            <li>
+              Select <strong>Reload</strong> <span class="reload-icon" aria-hidden="true">↻</span>
+              to fetch the latest available data.
+            </li>
+            <li>Select a <strong>player’s name</strong> to open their activity history.</li>
+            <li>In <strong>player’s history</strong> click to any data point for detailed data</li>
+            <li>
+              Open <strong>Top players</strong> to see who earned the most points at the selected
+              stake for the dates shown. Select any name in the list to see that player’s history.
+            </li>
+            <li>
+              Check the <strong>Live</strong> column. A green dot means the player gained points
+              between the two snapshots.
+            </li>
+          </ul>
+        </div>
+      </template>
     </AppDialog>
 
     <AppDialog v-if="showTopPlayers" title="Top players" @close="closeTopPlayers">
-      <template #subtitle>{{ gameLabel(mainGroup) }} · {{ stakeLabel(selectedTable) }}</template>
+      <template #subtitle>
+        {{ gameLabel(mainGroup) }} · {{ stakeLabel(selectedTable) }}
+        <template v-if="topPlayers.length || topPlayersDateRange">
+          <br />
+          {{
+            topPlayersDateRange
+              ? `Players with most points between ${topPlayersDateRange}`
+              : 'Players with most points'
+          }}
+        </template>
+      </template>
       <p v-if="topPlayersLoading" class="dialog-state" role="status">Loading top players…</p>
       <div v-else-if="topPlayersError" class="dialog-state">
         <p class="notice" role="alert">{{ topPlayersError }}</p>

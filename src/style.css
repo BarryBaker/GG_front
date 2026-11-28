@@ -100,6 +100,20 @@ button:disabled {
   min-height: 4.5rem;
 }
 
+.masthead-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-inline-start: auto;
+}
+
+.utc-clock {
+  color: var(--color-secondary);
+  font-size: 0.81rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -287,12 +301,26 @@ button:disabled {
   background: var(--color-border-strong);
 }
 
+.stake-details {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
 .selected-stake {
   color: var(--color-secondary);
   font-size: 0.74em;
   font-weight: 550;
   letter-spacing: 0;
-  white-space: nowrap;
+}
+
+.snapshot-age {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .table-summary {
@@ -589,6 +617,10 @@ button:disabled {
   background: var(--color-backdrop);
 }
 
+.app-dialog-paged {
+  width: min(36rem, calc(100% - 2rem));
+}
+
 .app-dialog-wide {
   width: min(68rem, calc(100% - 2rem));
 }
@@ -644,6 +676,108 @@ button:disabled {
   outline-offset: -3px;
 }
 
+.dialog-frame-paged {
+  display: grid;
+  height: min(36rem, calc(100dvh - 2rem));
+  grid-template-areas:
+    'header header header'
+    'previous body next'
+    'dots dots dots';
+  grid-template-columns: clamp(2.5rem, 10vw, 3.25rem) minmax(0, 1fr) clamp(2.5rem, 10vw, 3.25rem);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.dialog-frame-paged .dialog-header {
+  grid-area: header;
+}
+
+.dialog-frame-paged .dialog-body {
+  grid-area: body;
+  padding-inline: 0.25rem;
+}
+
+.dialog-page-arrow,
+.dialog-page-dot {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--color-muted);
+  background: var(--color-clear);
+  border: 0;
+  border-radius: var(--radius-control);
+}
+
+.dialog-page-arrow {
+  width: 2rem;
+  height: 2.75rem;
+  place-self: center;
+}
+
+.dialog-page-arrow::before {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  content: '';
+}
+
+.dialog-page-previous {
+  grid-area: previous;
+}
+
+.dialog-page-previous::before {
+  transform: translateX(0.12rem) rotate(-135deg);
+}
+
+.dialog-page-next {
+  grid-area: next;
+}
+
+.dialog-page-next::before {
+  transform: translateX(-0.12rem) rotate(45deg);
+}
+
+.dialog-page-arrow[aria-disabled='true'] {
+  color: var(--color-idle);
+  cursor: default;
+  opacity: 0.55;
+}
+
+.dialog-page-arrow:not([aria-disabled='true']):hover {
+  color: var(--color-accent);
+  background: var(--color-hover);
+}
+
+.dialog-page-dots {
+  display: flex;
+  grid-area: dots;
+  justify-content: center;
+  padding: 0.35rem;
+  border-top: 1px solid var(--color-divider);
+}
+
+.dialog-page-dot {
+  width: 1.75rem;
+  height: 2rem;
+}
+
+.dialog-page-dot::before {
+  width: 0.48rem;
+  height: 0.48rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  content: '';
+}
+
+.dialog-page-dot:hover,
+.dialog-page-dot[aria-current='page'] {
+  color: var(--color-accent);
+}
+
+.dialog-page-dot[aria-current='page']::before {
+  background: currentColor;
+}
+
 .app-dialog-compact .dialog-header {
   align-items: center;
   gap: 0.5rem;
@@ -684,27 +818,27 @@ button:disabled {
   margin-top: 0.75rem;
 }
 
-.help-content p,
-.help-content dl {
+.help-content p {
   margin: 0;
 }
 
-.help-content dl {
+.help-content ul {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.8rem 1rem;
-  margin-top: 1.15rem;
-  padding-top: 1.1rem;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0;
+  padding-inline-start: 1.1rem;
+}
+
+.help-content > ul {
+  gap: 0.65rem;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
   border-top: 1px solid var(--color-divider);
 }
 
-.help-content dt {
+.help-content strong,
+.help-content li::marker {
   color: var(--color-accent);
-  font-weight: 680;
-}
-
-.help-content dd {
-  margin: 0;
 }
 
 .players-list {
@@ -776,6 +910,9 @@ button:disabled {
 @media (max-width: 32rem) {
   .masthead-inner {
     min-height: 3.8rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding-block: 0.5rem;
   }
 
   .brand {
