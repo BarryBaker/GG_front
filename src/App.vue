@@ -480,9 +480,14 @@
         >
       </h1>
       <div class="masthead-actions">
-        <button class="action-button help-button" type="button" @click="showHelp = true">
+        <button
+          class="action-button help-button"
+          type="button"
+          aria-label="What’s this?"
+          @click="showHelp = true"
+        >
           <span class="help-icon" aria-hidden="true">?</span>
-          What’s this?
+          <span class="action-label">What’s this?</span>
         </button>
         <time class="utc-clock" :datetime="utcTime">{{ utcTime.slice(11, 16) }} UTC</time>
       </div>

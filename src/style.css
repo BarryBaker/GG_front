@@ -973,12 +973,18 @@ button:disabled {
 }
 
 @media (max-width: 477px) {
+  .masthead-actions .help-button {
+    width: 2rem;
+    padding: 0;
+  }
+
   .table-actions .action-button {
     width: 2.125rem;
     padding: 0;
   }
 
-  .table-actions .action-label {
+  .table-actions .action-label,
+  .help-button .action-label {
     display: none;
   }
 }
